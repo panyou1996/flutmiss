@@ -115,80 +115,100 @@ class _TopicPostListState extends State<TopicPostList> {
   bool Function(ScrollNotification) get onScrollNotification => widget.onScrollNotification;
   void Function(Set<int> visiblePostNumbers)? get onVisiblePostsChanged => widget.onVisiblePostsChanged;
 
-  /// 检测第一个可见帖子（通过 AutoScrollController 的 tagMap）
+  /// 检测当前可见帖子（Eyeline 机制）
+  ///
+  /// 参考 Discourse 官方实现（post-stream-viewport-tracker.js）的 eyeline 算法：
+  /// Eyeline 是一条虚拟水平线，代表用户"正在看"的位置。
+  /// - 大部分滚动过程中，eyeline 固定在视口顶部，当前帖子即顶部帖子
+  /// - 接近底部的最后一个视口距离内，eyeline 逐渐从顶部移向底部
+  /// - 滚到最底时，eyeline 在视口底部，确保能显示最后一个帖子
+  /// 这使得进度指示器在整个滚动过程中平滑过渡，无需硬编码特殊情况。
   void _updateFirstVisiblePost() {
     final posts = detail.postStream.posts;
     if (posts.isEmpty) return;
 
-    // 使用 AutoScrollController 的 tagMap 来确定可见帖子
     final tagMap = scrollController.tagMap;
     if (tagMap.isEmpty) return;
 
-    // 获取视口高度
     if (!scrollController.hasClients) return;
-    final viewportHeight = scrollController.position.viewportDimension;
+    final position = scrollController.position;
+    final viewportHeight = position.viewportDimension;
 
-    // 获取顶部栏高度（AppBar + 状态栏）
-    final topBarHeight = kToolbarHeight + MediaQuery.of(context).padding.top;
+    // 视口可见区域的上下边界
+    final topBoundary = kToolbarHeight + MediaQuery.of(context).padding.top;
+    final bottomBoundary = viewportHeight;
 
-    // 找到第一个在视口顶部附近的帖子，同时收集所有可见帖子
-    int? firstVisiblePostIndex;
-    double bestOffset = double.infinity;
-    bool foundScrolledPast = false; // 是否已找到滑出顶部的帖子
+    // === 计算 eyeline 位置 ===
+    double eyeline;
+    if (hasMoreAfter) {
+      // 还有更多帖子未加载，eyeline 固定在顶部（标准行为）
+      eyeline = topBoundary;
+    } else {
+      // 所有帖子已加载，根据滚动进度动态计算 eyeline
+      final remainingScroll = position.maxScrollExtent - position.pixels;
+      final totalScrollRange = position.maxScrollExtent - position.minScrollExtent;
+      // eyeline 在最后一个视口距离内从顶部过渡到底部
+      final scrollableArea = viewportHeight.clamp(0.0, totalScrollRange);
+      final progress = scrollableArea > 0
+          ? (1 - (remainingScroll / scrollableArea).clamp(0.0, 1.0))
+          : 1.0;
+      eyeline = topBoundary + progress * (bottomBoundary - topBoundary);
+    }
+
+    // === 找到 eyeline 所在的帖子并收集可见帖子 ===
+    int? eyelinePostIndex;
     final visiblePostNumbers = <int>{};
+    double closestDistance = double.infinity;
+    int? closestPostIndex;
 
     for (final entry in tagMap.entries) {
       final postIndex = entry.key;
       if (postIndex >= posts.length) continue;
 
-      final tagState = entry.value;
-      final ctx = tagState.context;
+      final ctx = entry.value.context;
       if (!ctx.mounted) continue;
 
       final renderBox = ctx.findRenderObject() as RenderBox?;
       if (renderBox == null || !renderBox.hasSize) continue;
 
-      // 获取帖子顶部相对于屏幕的位置
-      final globalPosition = renderBox.localToGlobal(Offset.zero);
-      final topY = globalPosition.dy;
+      final topY = renderBox.localToGlobal(Offset.zero).dy;
+      final bottomY = topY + renderBox.size.height;
 
-      // 相对于可见区域顶部的位置（减去顶部栏高度）
-      final relativeTopY = topY - topBarHeight;
-
-      // 帖子在可见区域内（考虑顶部栏遮挡）
-      if (topY < viewportHeight && topY > topBarHeight - renderBox.size.height) {
-        // 添加到可见帖子集合
+      // 收集可见帖子（帖子与视口有交集）
+      if (topY < viewportHeight && bottomY > topBoundary) {
         visiblePostNumbers.add(posts[postIndex].postNumber);
+      }
 
-        // 找到最靠近可见区域顶部（或刚超过顶部）的帖子
-        if (relativeTopY <= 0 && relativeTopY.abs() < bestOffset) {
-          if (!foundScrolledPast) {
-            // 首次找到滑出顶部的帖子，重置 bestOffset（优先级高于未滑出的）
-            bestOffset = double.infinity;
-            foundScrolledPast = true;
-          }
-          bestOffset = relativeTopY.abs();
-          firstVisiblePostIndex = postIndex;
-        } else if (!foundScrolledPast && relativeTopY > 0 && relativeTopY < bestOffset) {
-          // 没有帖子滑出顶部时，取最靠近顶部的
-          bestOffset = relativeTopY;
-          firstVisiblePostIndex = postIndex;
-        }
+      // 帖子包含 eyeline → 即为当前帖子
+      if (topY <= eyeline && bottomY > eyeline) {
+        eyelinePostIndex = postIndex;
+      }
+
+      // 记录距 eyeline 最近的帖子（兜底用）
+      final distance = topY > eyeline
+          ? topY - eyeline
+          : (bottomY < eyeline ? eyeline - bottomY : 0.0);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestPostIndex = postIndex;
       }
     }
+
+    // 没有帖子包含 eyeline 时（如处于帖子间隙或底部留白），取最近的帖子
+    eyelinePostIndex ??= closestPostIndex;
 
     // 通知可见帖子变化（用于 screenTrack）
     if (visiblePostNumbers.isNotEmpty) {
       onVisiblePostsChanged?.call(visiblePostNumbers);
     }
 
-    if (firstVisiblePostIndex != null) {
-      final postNumber = posts[firstVisiblePostIndex].postNumber;
+    if (eyelinePostIndex != null) {
+      final reportPostNumber = posts[eyelinePostIndex].postNumber;
 
       // 防止重复报告相同的帖子
-      if (postNumber != _lastReportedPostNumber) {
-        _lastReportedPostNumber = postNumber;
-        widget.onFirstVisiblePostChanged(postNumber);
+      if (reportPostNumber != _lastReportedPostNumber) {
+        _lastReportedPostNumber = reportPostNumber;
+        widget.onFirstVisiblePostChanged(reportPostNumber);
       }
     }
   }
