@@ -62,6 +62,9 @@
 	<!-- 启用 UIScene lifecycle（app_links 需要） -->
 	<key>FlutterDeepLinkingEnabled</key>
 	<false/>
+	<!-- 相册写入权限 -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>需要访问相册以保存图片</string>
 	<!-- 后台任务标识符 -->
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
