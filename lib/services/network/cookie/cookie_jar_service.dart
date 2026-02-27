@@ -297,11 +297,29 @@ class CookieJarService {
       }
 
       // 设置 cookie 到 WebView
+      // Apple 平台：iOS setCookie 的 domain 必须带前导点，否则静默失败
+      //   （flutter_inappwebview #338）。对 domain cookie 补前导点，
+      //   host-only cookie 用 sourceHost 兜底。
+      // Android 平台：保持 cookie.domain 原值（与 0.1.28 一致），
+      //   host-only cookie 保持 null，syncFromWebView 读回时存入 hostCookies，
+      //   不会覆盖 Dio saveCookies 存入 domainCookies 中的有效副本。
+      final isApple = io.Platform.isIOS || io.Platform.isMacOS;
       final cookieMaps = <Map<String, dynamic>>[];
       for (final (cookie, sourceHost) in cookies) {
         final value = CookieValueCodec.decode(cookie.value);
-        final domain = _resolveWebViewDomain(cookie.domain, sourceHost);
-        final cookieUrl = 'https://${_stripLeadingDot(domain)}';
+        final String? domain;
+        if (isApple) {
+          // Apple: 确保 domain 非 null 且有前导点
+          if (cookie.domain != null) {
+            domain = cookie.domain!.startsWith('.') ? cookie.domain : '.${cookie.domain}';
+          } else {
+            domain = sourceHost;
+          }
+        } else {
+          // Android: 保持原值
+          domain = cookie.domain;
+        }
+        final cookieUrl = 'https://${domain != null && domain.startsWith('.') ? domain.substring(1) : (domain ?? sourceHost)}';
 
         await _webViewCookieManager.setCookie(
           url: WebUri(cookieUrl),
@@ -389,8 +407,8 @@ class CookieJarService {
         ..secure = secure
         ..httpOnly = httpOnly;
 
-      if (domain != null) {
-        cookie.domain = domain.startsWith('.') ? domain : '.$domain';
+      if (domain != null && domain.startsWith('.')) {
+        cookie.domain = domain;
       }
       if (expires != null) {
         cookie.expires = expires;
@@ -506,19 +524,6 @@ class CookieJarService {
       }
     }
     return hosts.toList();
-  }
-
-  /// 解析 cookie 在 WebView 中应使用的 domain。
-  /// - domain 非 null 时补上前导点（RFC 6265: Domain=linux.do 等价于 .linux.do，
-  ///   但 WKWebView 的 HTTPCookie 只有带前导点才匹配子域）。
-  /// - domain 为 null（host-only cookie）时使用来源 host。
-  static String _resolveWebViewDomain(String? cookieDomain, String sourceHost) {
-    if (cookieDomain == null) return sourceHost;
-    return cookieDomain.startsWith('.') ? cookieDomain : '.$cookieDomain';
-  }
-
-  static String _stripLeadingDot(String domain) {
-    return domain.startsWith('.') ? domain.substring(1) : domain;
   }
 
   /// 是否是认证关键 cookie（丢失会导致登出）
