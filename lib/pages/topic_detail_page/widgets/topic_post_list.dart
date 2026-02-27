@@ -42,6 +42,7 @@ class TopicPostList extends StatefulWidget {
   final void Function(int, bool) onVoteChanged;
   final void Function(TopicNotificationLevel)? onNotificationLevelChanged;
   final void Function(int postId, bool accepted)? onSolutionChanged;
+  final void Function(String selectedText, Post post)? onQuoteSelection;
   final bool Function(ScrollNotification) onScrollNotification;
 
   const TopicPostList({
@@ -69,6 +70,7 @@ class TopicPostList extends StatefulWidget {
     required this.onVoteChanged,
     this.onNotificationLevelChanged,
     this.onSolutionChanged,
+    this.onQuoteSelection,
     required this.onScrollNotification,
   });
 
@@ -113,6 +115,7 @@ class _TopicPostListState extends State<TopicPostList> {
   void Function(int, bool) get onVoteChanged => widget.onVoteChanged;
   void Function(TopicNotificationLevel)? get onNotificationLevelChanged => widget.onNotificationLevelChanged;
   void Function(int postId, bool accepted)? get onSolutionChanged => widget.onSolutionChanged;
+  void Function(String selectedText, Post post)? get onQuoteSelection => widget.onQuoteSelection;
   bool Function(ScrollNotification) get onScrollNotification => widget.onScrollNotification;
   void Function(Set<int> visiblePostNumbers)? get onVisiblePostsChanged => widget.onVisiblePostsChanged;
 
@@ -427,6 +430,7 @@ class _TopicPostListState extends State<TopicPostList> {
               onRefreshPost: onRefreshPost,
               onJumpToPost: onJumpToPost,
               onSolutionChanged: onSolutionChanged,
+              onQuoteSelection: onQuoteSelection,
             ),
           ],
         ),

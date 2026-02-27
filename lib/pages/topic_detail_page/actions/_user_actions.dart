@@ -228,6 +228,60 @@ extension _UserActions on _TopicDetailPageState {
     ExportSheet.show(context, detail);
   }
 
+  /// 处理划词引用
+  Future<void> _handleQuoteSelection(String selectedText, Post post) async {
+    final params = _params;
+    final detail = ref.read(topicDetailProvider(params)).value;
+
+    // 尝试从 HTML 提取对应片段并转为 Markdown
+    String markdown;
+    final htmlFragment = HtmlTextMapper.extractHtml(post.cooked, selectedText);
+    if (htmlFragment != null) {
+      markdown = HtmlToMarkdown.convert(htmlFragment);
+      // 转换失败时降级为纯文本
+      if (markdown.trim().isEmpty) {
+        markdown = selectedText;
+      }
+    } else {
+      // 映射失败，使用纯文本
+      markdown = selectedText;
+    }
+
+    // 构建引用格式
+    final quote = QuoteBuilder.build(
+      markdown: markdown,
+      username: post.username,
+      postNumber: post.postNumber,
+      topicId: widget.topicId,
+    );
+
+    // 打开回复框，预填引用内容（回复给被引用的帖子）
+    final newPost = await showReplySheet(
+      context: context,
+      topicId: widget.topicId,
+      categoryId: detail?.categoryId,
+      replyToPost: post,
+      initialContent: quote,
+    );
+
+    if (newPost != null && mounted) {
+      final addedToView = ref.read(topicDetailProvider(params).notifier).addPost(newPost);
+
+      if (addedToView) {
+        _scrollAfterKeyboardDismiss(newPost.postNumber);
+      } else {
+        if (mounted) {
+          ToastService.show(
+            '回复已发送',
+            type: ToastType.success,
+            actionLabel: '查看',
+            onAction: () => _scrollToPost(newPost.postNumber),
+          );
+        }
+      }
+    }
+  }
+
   /// 处理帖子级别的 MessageBus 更新
   void _handlePostUpdate(TopicDetailNotifier notifier, PostUpdate update) {
     switch (update.type) {

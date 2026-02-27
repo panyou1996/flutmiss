@@ -35,7 +35,11 @@ class MarkdownBody extends StatelessWidget {
     processedData = processedData.replaceAll(RegExp(r'\n{3,}'), '\n\n');
     processedData = processedData.trim();
 
-    // 4. 预处理 [spoiler] 标记（转换为占位符或行内 HTML）
+    // 4. 预处理 [quote] 标记（转换为占位符，避免被 markdown 解析干扰）
+    final quoteBlocks = <String, String>{};
+    processedData = _processQuoteBlocks(processedData, quoteBlocks);
+
+    // 5. 预处理 [spoiler] 标记（转换为占位符或行内 HTML）
     final spoilerBlocks = <String, String>{};
     processedData = _processSpoilerBlocks(processedData, spoilerBlocks);
 
@@ -54,8 +58,11 @@ class MarkdownBody extends StatelessWidget {
 
     // 8. 后处理：将 spoiler 占位符替换回 div.spoiler
     html = _restoreSpoilerBlocks(html, spoilerBlocks);
+
+    // 9. 后处理：将 quote 占位符替换回 aside.quote
+    html = _restoreQuoteBlocks(html, quoteBlocks);
     
-    // 9. 使用 DiscourseHtmlContent 渲染，与帖子显示保持一致
+    // 10. 使用 DiscourseHtmlContent 渲染，与帖子显示保持一致
     return DiscourseHtmlContent(
       html: html,
       textStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -197,6 +204,77 @@ class MarkdownBody extends StatelessWidget {
     return result;
   }
   
+  /// 预处理 [quote="username, post:N, topic:T"]...[/quote] 标记
+  /// 将其替换为占位符，避免被 markdown 解析器干扰
+  String _processQuoteBlocks(String text, Map<String, String> quoteBlocks) {
+    final quoteRegex = RegExp(
+      r'\[quote(?:="([^"]*)")?\](.*?)\[/quote\]',
+      multiLine: true,
+      dotAll: true,
+    );
+
+    int index = 0;
+    return text.replaceAllMapped(quoteRegex, (match) {
+      final attrs = match.group(1) ?? '';
+      final content = match.group(2) ?? '';
+      final placeholder = '<!--QUOTE_PLACEHOLDER_$index-->';
+      quoteBlocks[placeholder] = '$attrs\n$content';
+      index++;
+      return placeholder;
+    });
+  }
+
+  /// 后处理：将 quote 占位符替换为 aside.quote HTML
+  String _restoreQuoteBlocks(String html, Map<String, String> quoteBlocks) {
+    var result = html;
+
+    for (final entry in quoteBlocks.entries) {
+      final placeholder = entry.key;
+      final raw = entry.value;
+      final firstNewline = raw.indexOf('\n');
+      final attrs = firstNewline >= 0 ? raw.substring(0, firstNewline) : '';
+      final markdownContent = firstNewline >= 0 ? raw.substring(firstNewline + 1) : raw;
+
+      // 解析属性
+      String? username;
+      String? post;
+      String? topic;
+      if (attrs.isNotEmpty) {
+        // 格式: "username, post:N, topic:T"
+        final parts = attrs.split(',').map((s) => s.trim()).toList();
+        if (parts.isNotEmpty) username = parts[0];
+        for (final part in parts.skip(1)) {
+          if (part.startsWith('post:')) {
+            post = part.substring(5);
+          } else if (part.startsWith('topic:')) {
+            topic = part.substring(6);
+          }
+        }
+      }
+
+      // 将引用内的 markdown 转成 HTML
+      final quoteHtml = md.markdownToHtml(
+        markdownContent.trim(),
+        extensionSet: md.ExtensionSet.gitHubFlavored,
+      );
+
+      // 构建 aside.quote HTML（与 Discourse 的格式一致）
+      final dataAttrs = StringBuffer();
+      if (username != null) dataAttrs.write(' data-username="$username"');
+      if (post != null) dataAttrs.write(' data-post="$post"');
+      if (topic != null) dataAttrs.write(' data-topic="$topic"');
+
+      final replacement = '<aside class="quote"$dataAttrs>'
+          '<blockquote>$quoteHtml</blockquote>'
+          '</aside>';
+
+      result = result.replaceAll('<p>$placeholder</p>', replacement);
+      result = result.replaceAll(placeholder, replacement);
+    }
+
+    return result;
+  }
+
   /// 将 @用户名 转换为 HTML 链接
   /// 匹配规则：@ 后面跟字母、数字、下划线、连字符
   String _processMentions(String text) {

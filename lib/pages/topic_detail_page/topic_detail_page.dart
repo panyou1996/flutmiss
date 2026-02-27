@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../utils/html_text_mapper.dart';
+import '../../utils/html_to_markdown.dart';
 import '../../utils/link_launcher.dart';
+import '../../utils/quote_builder.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:async';
 import '../../models/draft.dart';
@@ -980,6 +983,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage> with WidgetsB
               onVoteChanged: _handleVoteChanged,
               onNotificationLevelChanged: (level) => _handleNotificationLevelChanged(notifier, level),
               onSolutionChanged: _handleSolutionChanged,
+              onQuoteSelection: isLoggedIn ? _handleQuoteSelection : null,
               onScrollNotification: _controller.handleScrollNotification,
             );
           },

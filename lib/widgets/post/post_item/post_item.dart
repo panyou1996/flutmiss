@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show SelectedContent;
 import 'package:flutter/services.dart';
+import '../../../utils/html_text_mapper.dart';
+import '../../../utils/html_to_markdown.dart';
+import '../../../utils/quote_builder.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../constants.dart';
@@ -44,6 +48,7 @@ class PostItem extends ConsumerStatefulWidget {
   final int? acceptedAnswerPostNumber;
   final String? dateSeparatorLabel;
   final String? bottomDateSeparatorLabel;
+  final void Function(String selectedText, Post post)? onQuoteSelection;
 
   const PostItem({
     super.key,
@@ -62,6 +67,7 @@ class PostItem extends ConsumerStatefulWidget {
     this.acceptedAnswerPostNumber,
     this.dateSeparatorLabel,
     this.bottomDateSeparatorLabel,
+    this.onQuoteSelection,
   });
 
   @override
@@ -71,6 +77,9 @@ class PostItem extends ConsumerStatefulWidget {
 class _PostItemState extends ConsumerState<PostItem> {
   final DiscourseService _service = DiscourseService();
   final GlobalKey _likeButtonKey = GlobalKey();
+
+  // 当前选中的文本内容（用于划词引用）
+  SelectedContent? _lastSelectedContent;
 
   // 点赞状态
   bool _isLiking = false;
@@ -104,6 +113,28 @@ class _PostItemState extends ConsumerState<PostItem> {
 
   // 删除状态
   bool _isDeleting = false;
+
+  /// 复制引用到剪贴板
+  void _copyQuote(String selectedText, Post post) {
+    String markdown;
+    final htmlFragment = HtmlTextMapper.extractHtml(post.cooked, selectedText);
+    if (htmlFragment != null) {
+      markdown = HtmlToMarkdown.convert(htmlFragment);
+      if (markdown.trim().isEmpty) markdown = selectedText;
+    } else {
+      markdown = selectedText;
+    }
+
+    final quote = QuoteBuilder.build(
+      markdown: markdown,
+      username: post.username,
+      postNumber: post.postNumber,
+      topicId: widget.topicId,
+    );
+
+    Clipboard.setData(ClipboardData(text: quote));
+    ToastService.showSuccess('已复制引用');
+  }
 
   bool get _canLoadMoreReplies => _replies.length < widget.post.replyCount;
 
@@ -473,6 +504,48 @@ class _PostItemState extends ConsumerState<PostItem> {
                             ),
                           );
                         },
+                        onSelectionChanged: widget.onQuoteSelection != null
+                            ? (content) {
+                                _lastSelectedContent = content;
+                              }
+                            : null,
+                        contextMenuBuilder: widget.onQuoteSelection != null
+                            ? (context, state) {
+                                final items = List<ContextMenuButtonItem>.from(
+                                  state.contextMenuButtonItems,
+                                );
+                                items.insert(
+                                  0,
+                                  ContextMenuButtonItem(
+                                    label: '引用',
+                                    onPressed: () {
+                                      final plainText = _lastSelectedContent?.plainText;
+                                      if (plainText != null && plainText.isNotEmpty) {
+                                        widget.onQuoteSelection!(plainText, post);
+                                      }
+                                      state.hideToolbar();
+                                    },
+                                  ),
+                                );
+                                items.insert(
+                                  1,
+                                  ContextMenuButtonItem(
+                                    label: '复制引用',
+                                    onPressed: () {
+                                      final plainText = _lastSelectedContent?.plainText;
+                                      if (plainText != null && plainText.isNotEmpty) {
+                                        _copyQuote(plainText, post);
+                                      }
+                                      state.hideToolbar();
+                                    },
+                                  ),
+                                );
+                                return AdaptiveTextSelectionToolbar.buttonItems(
+                                  anchors: state.contextMenuAnchors,
+                                  buttonItems: items,
+                                );
+                              }
+                            : null,
                       ),
                     ),
 

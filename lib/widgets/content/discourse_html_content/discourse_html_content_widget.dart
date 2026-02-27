@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show SelectedContent;
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pangutext/pangutext.dart';
@@ -55,6 +56,10 @@ class DiscourseHtmlContent extends ConsumerStatefulWidget {
   final bool? enablePanguSpacing;
   /// 截图模式：展开代码块、表格等滚动区域，确保完整显示
   final bool screenshotMode;
+  /// 文本选择变化回调
+  final void Function(SelectedContent?)? onSelectionChanged;
+  /// 自定义右键/长按菜单构建器
+  final Widget Function(BuildContext, SelectableRegionState)? contextMenuBuilder;
 
   const DiscourseHtmlContent({
     super.key,
@@ -72,6 +77,8 @@ class DiscourseHtmlContent extends ConsumerStatefulWidget {
     this.topicId,
     this.enablePanguSpacing,
     this.screenshotMode = false,
+    this.onSelectionChanged,
+    this.contextMenuBuilder,
   });
 
   @override
@@ -395,7 +402,16 @@ class _DiscourseHtmlContentState extends ConsumerState<DiscourseHtmlContent> {
 
     // 根据参数决定是否包裹 SelectionArea
     if (widget.enableSelectionArea) {
-      return SelectionArea(child: result);
+      return SelectionArea(
+        onSelectionChanged: widget.onSelectionChanged,
+        contextMenuBuilder: widget.contextMenuBuilder ?? (context, state) {
+          return AdaptiveTextSelectionToolbar.buttonItems(
+            anchors: state.contextMenuAnchors,
+            buttonItems: state.contextMenuButtonItems,
+          );
+        },
+        child: result,
+      );
     }
     return result;
   }

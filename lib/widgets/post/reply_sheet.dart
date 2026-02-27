@@ -17,6 +17,7 @@ import '../common/loading_spinner.dart';
 /// [replyToPost] 可选，被回复的帖子
 /// [targetUsername] 可选，私信目标用户名 (创建私信时必需)
 /// [preloadedDraftFuture] 预加载的草稿 Future（在点击回复按钮时就发起请求）
+/// [initialContent] 可选，预填内容（划词引用时使用）
 /// 返回创建的 Post 对象，取消或失败返回 null
 Future<Post?> showReplySheet({
   required BuildContext context,
@@ -25,6 +26,7 @@ Future<Post?> showReplySheet({
   Post? replyToPost,
   String? targetUsername,
   Future<Draft?>? preloadedDraftFuture,
+  String? initialContent,
 }) async {
   final result = await showModalBottomSheet<Post?>(
     context: context,
@@ -37,6 +39,7 @@ Future<Post?> showReplySheet({
       replyToPost: replyToPost,
       targetUsername: targetUsername,
       preloadedDraftFuture: preloadedDraftFuture,
+      initialContent: initialContent,
     ),
   );
   return result;
@@ -74,6 +77,7 @@ class ReplySheet extends ConsumerStatefulWidget {
   final String? targetUsername;
   final Post? editPost; // 编辑模式：要编辑的帖子
   final Future<Draft?>? preloadedDraftFuture; // 预加载的草稿
+  final String? initialContent; // 预填内容（划词引用时使用）
 
   const ReplySheet({
     super.key,
@@ -83,6 +87,7 @@ class ReplySheet extends ConsumerStatefulWidget {
     this.targetUsername,
     this.editPost,
     this.preloadedDraftFuture,
+    this.initialContent,
   });
 
   @override
@@ -122,6 +127,14 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
     if (_isEditMode) {
       _loadPostRaw();
     } else {
+      // 预填内容（划词引用）
+      if (widget.initialContent != null && widget.initialContent!.isNotEmpty) {
+        _contentController.text = widget.initialContent!;
+        // 光标移到末尾
+        _contentController.selection = TextSelection.fromPosition(
+          TextPosition(offset: _contentController.text.length),
+        );
+      }
       // 非编辑模式：初始化草稿控制器并加载草稿
       _initDraftController();
     }
@@ -224,7 +237,12 @@ class _ReplySheetState extends ConsumerState<ReplySheet> {
   /// 恢复草稿内容
   void _restoreDraft(Draft draft) {
     if (draft.data.reply != null) {
-      _contentController.text = draft.data.reply!;
+      // 有预填内容时，将草稿追加到引用内容后面
+      if (widget.initialContent != null && widget.initialContent!.isNotEmpty) {
+        _contentController.text = '${widget.initialContent}${draft.data.reply}';
+      } else {
+        _contentController.text = draft.data.reply!;
+      }
     }
     if (_isPrivateMessage && draft.data.title != null) {
       _titleController.text = draft.data.title!;

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show SelectedContent;
 import '../discourse_html_content_widget.dart';
 import '../image_utils.dart';
 import '../../../../models/topic.dart';
@@ -33,6 +34,12 @@ class ChunkedHtmlContent extends StatefulWidget {
 
   /// 话题 ID（用于链接点击追踪）
   final int? topicId;
+
+  /// 文本选择变化回调
+  final void Function(SelectedContent?)? onSelectionChanged;
+
+  /// 自定义右键/长按菜单构建器
+  final Widget Function(BuildContext, SelectableRegionState)? contextMenuBuilder;
 
   /// 获取 HTML 分块结果，不需要分块时返回 null
   static List<HtmlChunk>? getChunks(String html) {
@@ -74,6 +81,8 @@ class ChunkedHtmlContent extends StatefulWidget {
     this.mentionedUsers,
     this.post,
     this.topicId,
+    this.onSelectionChanged,
+    this.contextMenuBuilder,
   });
 
   @override
@@ -135,6 +144,8 @@ class _ChunkedHtmlContentState extends State<ChunkedHtmlContent> {
         mentionedUsers: widget.mentionedUsers,
         post: widget.post,
         topicId: widget.topicId,
+        onSelectionChanged: widget.onSelectionChanged,
+        contextMenuBuilder: widget.contextMenuBuilder,
       );
     }
 
@@ -157,6 +168,13 @@ class _ChunkedHtmlContentState extends State<ChunkedHtmlContent> {
     }
 
     return SelectionArea(
+      onSelectionChanged: widget.onSelectionChanged,
+      contextMenuBuilder: widget.contextMenuBuilder ?? (context, state) {
+        return AdaptiveTextSelectionToolbar.buttonItems(
+          anchors: state.contextMenuAnchors,
+          buttonItems: state.contextMenuButtonItems,
+        );
+      },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: children,
@@ -183,6 +201,12 @@ class HtmlChunkWidget extends StatelessWidget {
   /// PostItemSliver 中各块独立存在于 SliverList，需传 true 让每块自行支持选择。
   final bool enableSelectionArea;
 
+  /// 文本选择变化回调
+  final void Function(SelectedContent?)? onSelectionChanged;
+
+  /// 自定义右键/长按菜单构建器
+  final Widget Function(BuildContext, SelectableRegionState)? contextMenuBuilder;
+
   const HtmlChunkWidget({
     super.key,
     required this.chunk,
@@ -195,6 +219,8 @@ class HtmlChunkWidget extends StatelessWidget {
     this.post,
     this.topicId,
     this.enableSelectionArea = false,
+    this.onSelectionChanged,
+    this.contextMenuBuilder,
   });
 
   @override
@@ -212,6 +238,8 @@ class HtmlChunkWidget extends StatelessWidget {
         isChunkChild: true,
         post: post,
         topicId: topicId,
+        onSelectionChanged: onSelectionChanged,
+        contextMenuBuilder: contextMenuBuilder,
       ),
     );
   }

@@ -7,6 +7,7 @@ import '../../../services/discourse_cache_manager.dart';
 import 'builders/video_builder.dart';
 import 'image_utils.dart';
 import 'lazy_image.dart';
+import 'selectable_adapter.dart';
 
 /// 自定义 WidgetFactory，仅用于接管图片渲染
 class DiscourseWidgetFactory extends WidgetFactory {
@@ -59,16 +60,21 @@ class DiscourseWidgetFactory extends WidgetFactory {
     // 检查是否是显式的 emoji class
     final bool isEmoji = tree.element.classes.contains('emoji');
 
+    // 获取 emoji title（用于 SelectableAdapter，使 emoji 可被选中）
+    final String? emojiTitle = isEmoji
+        ? (tree.element.attributes['title'] ?? tree.element.attributes['alt'])
+        : null;
+
     // 普通 URL：直接构建 widget，无需 FutureBuilder
     if (!DiscourseImageUtils.isUploadUrl(url)) {
-      return _buildImageWidget(url, url, width, height, isEmoji);
+      return _buildImageWidget(url, url, width, height, isEmoji, emojiTitle: emojiTitle);
     }
 
     // upload:// 短链接：检查缓存
     if (DiscourseImageUtils.isUploadUrlCached(url)) {
       final resolvedUrl = DiscourseImageUtils.getCachedUploadUrl(url);
       if (resolvedUrl != null) {
-        return _buildImageWidget(resolvedUrl, url, width, height, isEmoji);
+        return _buildImageWidget(resolvedUrl, url, width, height, isEmoji, emojiTitle: emojiTitle);
       }
       // 解析失败的 URL，显示错误图标
       return Icon(
@@ -79,7 +85,7 @@ class DiscourseWidgetFactory extends WidgetFactory {
     }
 
     // upload:// 短链接首次加载：使用 FutureBuilder 解析
-    return FutureBuilder<String?>( 
+    return FutureBuilder<String?>(
       future: DiscourseImageUtils.resolveUploadUrl(url),
       builder: (context, snapshot) {
 
@@ -92,13 +98,13 @@ class DiscourseWidgetFactory extends WidgetFactory {
           );
         }
 
-        return _buildImageWidget(snapshot.data, url, width, height, isEmoji);
+        return _buildImageWidget(snapshot.data, url, width, height, isEmoji, emojiTitle: emojiTitle);
       },
     );
   }
 
   /// 构建图片 widget（从缓存或 FutureBuilder 调用）
-  Widget _buildImageWidget(String? resolvedUrl, String originalUrl, double? width, double? height, bool isEmoji) {
+  Widget _buildImageWidget(String? resolvedUrl, String originalUrl, double? width, double? height, bool isEmoji, {String? emojiTitle}) {
     // 检查是否是 SVG（处理带查询参数的 URL）
     final isSvg = _isSvgUrl(resolvedUrl) || _isSvgUrl(originalUrl);
 
@@ -181,10 +187,18 @@ class DiscourseWidgetFactory extends WidgetFactory {
                  );
 
            if (isEmoji) {
-             return Container(
+             Widget emojiWidget = Container(
                margin: const EdgeInsets.symmetric(horizontal: 2.0),
                child: imageWidget,
              );
+             // 用 SelectableAdapter 包裹，使 emoji 参与文本选择
+             if (emojiTitle != null && emojiTitle.isNotEmpty) {
+               emojiWidget = SelectableAdapter(
+                 selectedText: emojiTitle,
+                 child: emojiWidget,
+               );
+             }
+             return emojiWidget;
            }
 
            // 非画廊图片：与 Discourse 一致，不添加点击查看功能
