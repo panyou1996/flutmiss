@@ -250,7 +250,7 @@ class MessageBusService {
             e.response?.headers.value('Retry-After') ?? '',
           );
           final waitSeconds = (retryAfter ?? 60) + Random().nextInt(30);
-          debugPrint('[MessageBus] 触发速率限制，${waitSeconds}秒后重试');
+          debugPrint('[MessageBus] 触发速率限制，$waitSeconds秒后重试');
           await Future.delayed(Duration(seconds: waitSeconds));
           continue;
         }

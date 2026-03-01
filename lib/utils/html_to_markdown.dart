@@ -217,7 +217,7 @@ class _Tag {
 class _BlockTag extends _Tag {
   String gap;
 
-  _BlockTag([super.prefix, super.suffix, this.gap = '\n\n']);
+  _BlockTag([super.prefix, super.suffix]) : gap = '\n\n';
 
   @override
   String decorate(String text) {

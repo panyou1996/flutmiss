@@ -83,6 +83,7 @@ class TopicDetailController extends ChangeNotifier {
   final Set<int> _visiblePostNumbers = {};
   final Set<int> _readPostNumbers = {};
   int _currentVisibleStreamIndex = 1;
+  Map<int, int> _postIndexToScrollIndex = const {};
 
   /// stream 索引
   final ValueNotifier<int> streamIndexNotifier = ValueNotifier<int>(1);
@@ -121,6 +122,10 @@ class TopicDetailController extends ChangeNotifier {
 
   Set<int> get visiblePostNumbers => Set.unmodifiable(_visiblePostNumbers);
   int get currentVisibleStreamIndex => _currentVisibleStreamIndex;
+
+  int scrollIndexForPostIndex(int postIndex) {
+    return _postIndexToScrollIndex[postIndex] ?? postIndex;
+  }
 
   bool get trackEnabled => _trackEnabled;
   set trackEnabled(bool value) {
@@ -218,7 +223,7 @@ class TopicDetailController extends ChangeNotifier {
     if (postIndex == -1) return;
 
     await scrollController.scrollToIndex(
-      postIndex,
+      scrollIndexForPostIndex(postIndex),
       preferPosition: AutoScrollPosition.begin,
       duration: const Duration(milliseconds: 1),
     );
@@ -311,7 +316,11 @@ class TopicDetailController extends ChangeNotifier {
 
   /// 检查帖子是否已渲染
   bool isPostRendered(int postIndex) {
-    return scrollController.tagMap.containsKey(postIndex);
+    return scrollController.tagMap.containsKey(scrollIndexForPostIndex(postIndex));
+  }
+
+  void updateScrollIndexMapping(Map<int, int> mapping) {
+    _postIndexToScrollIndex = Map.unmodifiable(mapping);
   }
 
   /// 本地跳转到帖子（不重新请求，仅重置视图中心）

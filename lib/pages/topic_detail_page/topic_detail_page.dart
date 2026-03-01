@@ -6,6 +6,7 @@ import 'package:scroll_to_index/scroll_to_index.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../utils/html_text_mapper.dart';
 import '../../utils/html_to_markdown.dart';
+import '../../utils/code_selection_context.dart';
 import '../../utils/link_launcher.dart';
 import '../../utils/quote_builder.dart';
 import 'package:uuid/uuid.dart';
@@ -945,6 +946,7 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage> with WidgetsB
               dividerPostIndex: dividerPostIndex,
               onFirstVisiblePostChanged: _updateStreamIndexForPostNumber,
               onVisiblePostsChanged: _updateVisiblePosts,
+              onScrollIndexMappingChanged: _controller.updateScrollIndexMapping,
               onJumpToPost: _scrollToPost,
               onReply: _handleReply,
               onEdit: _handleEdit,

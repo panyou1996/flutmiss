@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show SelectedContent;
 import 'package:scroll_to_index/scroll_to_index.dart';
 import '../../../models/topic.dart';
 import '../../../providers/message_bus_providers.dart';
 import '../../../services/toast_service.dart';
+import '../../../utils/code_selection_context.dart';
 import '../../../utils/responsive.dart';
 import '../../../utils/time_utils.dart';
+import '../../../widgets/content/discourse_html_content/chunked/html_chunk.dart';
 import '../../../widgets/post/post_item/post_item.dart';
+import '../../../widgets/post/post_item/quote_selection_helper.dart';
+import '../../../widgets/post/post_item/segmented_long_post.dart';
 import '../../../widgets/post/post_item_skeleton.dart';
 import 'topic_detail_header.dart';
 import 'typing_indicator.dart';
@@ -34,6 +39,7 @@ class TopicPostList extends StatefulWidget {
   final int? dividerPostIndex;
   final void Function(int postNumber) onFirstVisiblePostChanged;
   final void Function(Set<int> visiblePostNumbers)? onVisiblePostsChanged;
+  final void Function(Map<int, int>)? onScrollIndexMappingChanged;
   final void Function(int postNumber) onJumpToPost;
   final void Function(Post? replyToPost) onReply;
   final void Function(Post post) onEdit;
@@ -64,6 +70,7 @@ class TopicPostList extends StatefulWidget {
     required this.dividerPostIndex,
     required this.onFirstVisiblePostChanged,
     this.onVisiblePostsChanged,
+    this.onScrollIndexMappingChanged,
     required this.onJumpToPost,
     required this.onReply,
     required this.onEdit,
@@ -84,6 +91,12 @@ class TopicPostList extends StatefulWidget {
 class _TopicPostListState extends State<TopicPostList> {
   int? _lastReportedPostNumber;
   bool _isThrottled = false;
+  List<_PostRenderSegment> _renderSegments = const [];
+  Map<int, int> _postIndexToScrollIndex = const {};
+  Map<int, int> _scrollIndexToPostNumber = const {};
+  SelectedContent? _lastLongPostSelectedContent;
+  Post? _activeLongSelectionPost;
+  CodeSelectionContext? _lastLongCodeSelectionContext;
 
   @override
   void initState() {
@@ -170,8 +183,8 @@ class _TopicPostListState extends State<TopicPostList> {
     int? closestPostIndex;
 
     for (final entry in tagMap.entries) {
-      final postIndex = entry.key;
-      if (postIndex >= posts.length) continue;
+      final postNumber = _scrollIndexToPostNumber[entry.key];
+      if (postNumber == null) continue;
 
       final ctx = entry.value.context;
       if (!ctx.mounted) continue;
@@ -184,12 +197,12 @@ class _TopicPostListState extends State<TopicPostList> {
 
       // 收集可见帖子（帖子与视口有交集）
       if (topY < viewportHeight && bottomY > topBoundary) {
-        visiblePostNumbers.add(posts[postIndex].postNumber);
+        visiblePostNumbers.add(postNumber);
       }
 
       // 帖子包含 eyeline → 即为当前帖子
       if (topY <= eyeline && bottomY > eyeline) {
-        eyelinePostIndex = postIndex;
+        eyelinePostIndex = posts.indexWhere((p) => p.postNumber == postNumber);
       }
 
       // 记录距 eyeline 最近的帖子（兜底用）
@@ -198,7 +211,7 @@ class _TopicPostListState extends State<TopicPostList> {
           : (bottomY < eyeline ? eyeline - bottomY : 0.0);
       if (distance < closestDistance) {
         closestDistance = distance;
-        closestPostIndex = postIndex;
+        closestPostIndex = posts.indexWhere((p) => p.postNumber == postNumber);
       }
     }
 
@@ -251,20 +264,116 @@ class _TopicPostListState extends State<TopicPostList> {
     );
   }
 
+  void _buildRenderSegments(List<Post> posts) {
+    final segments = <_PostRenderSegment>[];
+    final postIndexToScrollIndex = <int, int>{};
+    final scrollIndexToPostNumber = <int, int>{};
+
+    for (int postIndex = 0; postIndex < posts.length; postIndex++) {
+      final post = posts[postIndex];
+      final renderData = LongPostRenderData.fromHtml(post.cooked);
+      final useLongSegments = renderData.chunks.isNotEmpty;
+
+      postIndexToScrollIndex[postIndex] = segments.length;
+
+      if (!useLongSegments) {
+        scrollIndexToPostNumber[segments.length] = post.postNumber;
+        segments.add(_PostRenderSegment.shortPost(
+          scrollIndex: segments.length,
+          postIndex: postIndex,
+          post: post,
+        ));
+        continue;
+      }
+
+      scrollIndexToPostNumber[segments.length] = post.postNumber;
+      segments.add(_PostRenderSegment.header(
+        scrollIndex: segments.length,
+        postIndex: postIndex,
+        post: post,
+      ));
+
+      for (final chunk in renderData.chunks) {
+        scrollIndexToPostNumber[segments.length] = post.postNumber;
+        segments.add(_PostRenderSegment.chunk(
+          scrollIndex: segments.length,
+          postIndex: postIndex,
+          post: post,
+          chunkIndex: chunk.index,
+          chunkData: chunk,
+          renderData: renderData,
+        ));
+      }
+
+      scrollIndexToPostNumber[segments.length] = post.postNumber;
+      segments.add(_PostRenderSegment.footer(
+        scrollIndex: segments.length,
+        postIndex: postIndex,
+        post: post,
+      ));
+    }
+
+    _renderSegments = segments;
+    _postIndexToScrollIndex = postIndexToScrollIndex;
+    _scrollIndexToPostNumber = scrollIndexToPostNumber;
+    widget.onScrollIndexMappingChanged?.call(postIndexToScrollIndex);
+  }
+
+  void _rememberLongSelectionPost(Post post) {
+    _activeLongSelectionPost = post;
+    CodeSelectionContextTracker.instance.clear();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final posts = detail.postStream.posts;
     final hasFirstPost = posts.isNotEmpty && posts.first.postNumber == 1;
+    _buildRenderSegments(posts);
+    final centerScrollIndex = _postIndexToScrollIndex[centerPostIndex] ?? 0;
 
     final loadMoreSkeletonCount = calculateSkeletonCount(
       MediaQuery.of(context).size.height * 0.4,
       minCount: 2,
     );
 
-    return NotificationListener<ScrollNotification>(
-      onNotification: _handleScrollNotification,
-      child: CustomScrollView(
+    return SelectionArea(
+      onSelectionChanged: (content) {
+        _lastLongPostSelectedContent = content;
+        _lastLongCodeSelectionContext = CodeSelectionContextTracker.instance.current;
+        if (content == null) {
+          _activeLongSelectionPost = null;
+          _lastLongCodeSelectionContext = null;
+        }
+      },
+      contextMenuBuilder: (context, state) {
+        final plainText = _lastLongPostSelectedContent?.plainText;
+        final canQuote = onQuoteSelection != null &&
+            _activeLongSelectionPost != null &&
+            plainText != null &&
+            plainText.isNotEmpty;
+        if (!canQuote) {
+          return AdaptiveTextSelectionToolbar.buttonItems(
+            anchors: state.contextMenuAnchors,
+            buttonItems: state.contextMenuButtonItems,
+          );
+        }
+        final items = QuoteSelectionHelper.buildMenuItems(
+          baseItems: state.contextMenuButtonItems,
+          plainText: _lastLongPostSelectedContent?.plainText,
+          post: _activeLongSelectionPost,
+          hideToolbar: state.hideToolbar,
+          topicId: detail.id,
+          onQuoteSelection: onQuoteSelection,
+          codeContext: _lastLongCodeSelectionContext,
+        );
+        return AdaptiveTextSelectionToolbar.buttonItems(
+          anchors: state.contextMenuAnchors,
+          buttonItems: items,
+        );
+      },
+      child: NotificationListener<ScrollNotification>(
+        onNotification: _handleScrollNotification,
+        child: CustomScrollView(
           controller: scrollController,
           center: centerKey,
           cacheExtent: 500,
@@ -296,10 +405,10 @@ class _TopicPostListState extends State<TopicPostList> {
           // center 之前的 sliver 向上增长，index 0 离 center 最近，需要反转映射
           if (centerPostIndex > 0)
             SliverList.builder(
-              itemCount: centerPostIndex,
+              itemCount: centerScrollIndex,
               itemBuilder: (context, index) {
-                final postIndex = centerPostIndex - 1 - index;
-                return _buildPostItem(context, theme, posts[postIndex], postIndex);
+                final segmentIndex = centerScrollIndex - 1 - index;
+                return _buildSegmentItem(context, _renderSegments[segmentIndex]);
               },
             ),
 
@@ -325,19 +434,19 @@ class _TopicPostListState extends State<TopicPostList> {
                   ),
                 ),
                 SliverList.builder(
-                  itemCount: posts.length,
+                  itemCount: _renderSegments.length,
                   itemBuilder: (context, index) =>
-                      _buildPostItem(context, theme, posts[index], index),
+                      _buildSegmentItem(context, _renderSegments[index]),
                 ),
               ],
             )
           else
             SliverList.builder(
               key: centerKey,
-              itemCount: posts.length - centerPostIndex,
+              itemCount: _renderSegments.length - centerScrollIndex,
               itemBuilder: (context, index) {
-                final postIndex = centerPostIndex + index;
-                return _buildPostItem(context, theme, posts[postIndex], postIndex);
+                final segmentIndex = centerScrollIndex + index;
+                return _buildSegmentItem(context, _renderSegments[segmentIndex]);
               },
             ),
 
@@ -363,7 +472,8 @@ class _TopicPostListState extends State<TopicPostList> {
           SliverPadding(
             padding: EdgeInsets.only(bottom: 80 + MediaQuery.of(context).padding.bottom),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -382,66 +492,180 @@ class _TopicPostListState extends State<TopicPostList> {
     return currentDay != previousDay;
   }
 
-  /// 构建单个帖子 Widget（供 SliverList.builder 的 itemBuilder 使用）
-  Widget _buildPostItem(BuildContext context, ThemeData theme, Post post, int postIndex) {
+  Widget _buildSegmentItem(BuildContext context, _PostRenderSegment segment) {
+    final post = segment.post;
+    final postIndex = segment.postIndex;
     final showDivider = dividerPostIndex == postIndex;
-    // 日期分割线：上下卡片各渲染一份，确保不同绘制顺序下都有一个可见
-    final posts_ = detail.postStream.posts;
-    // 顶部：当前帖子与前一帖跨天时
     final showTopSeparator = _shouldShowDateSeparator(postIndex);
     final dateSeparatorLabel = showTopSeparator
         ? TimeUtils.formatSmartDate(post.createdAt)
         : null;
-    // 底部：下一帖与当前帖跨天时
+    final posts_ = detail.postStream.posts;
     final nextPostIndex = postIndex + 1;
-    final showBottomSeparator = nextPostIndex < posts_.length && _shouldShowDateSeparator(nextPostIndex);
+    final showBottomSeparator =
+        nextPostIndex < posts_.length && _shouldShowDateSeparator(nextPostIndex);
     final bottomDateSeparatorLabel = showBottomSeparator
         ? TimeUtils.formatSmartDate(posts_[nextPostIndex].createdAt)
         : null;
-    return _wrapContent(
+    final highlight = highlightPostNumber == post.postNumber;
+    final Widget child;
+
+    switch (segment.type) {
+      case _PostRenderSegmentType.shortPost:
+        child = PostItem(
+          post: post,
+          topicId: detail.id,
+          highlight: highlight,
+          isTopicOwner: detail.createdBy?.username == post.username,
+          topicHasAcceptedAnswer: detail.hasAcceptedAnswer,
+          acceptedAnswerPostNumber: detail.acceptedAnswerPostNumber,
+          dateSeparatorLabel: dateSeparatorLabel,
+          bottomDateSeparatorLabel: bottomDateSeparatorLabel,
+          onLike: () => ToastService.showInfo('点赞功能开发中...'),
+          onReply: isLoggedIn ? () => onReply(post.postNumber == 1 ? null : post) : null,
+          onEdit: isLoggedIn && post.canEdit ? () => onEdit(post) : null,
+          onShareAsImage: onShareAsImage != null ? () => onShareAsImage!(post) : null,
+          onRefreshPost: onRefreshPost,
+          onJumpToPost: onJumpToPost,
+          onSolutionChanged: onSolutionChanged,
+          onQuoteSelection: onQuoteSelection,
+          onQuoteImage: onQuoteImage,
+        );
+        break;
+      case _PostRenderSegmentType.longHeader:
+        child = LongPostHeaderSegment(
+          post: post,
+          topicId: detail.id,
+          highlight: highlight,
+          isTopicOwner: detail.createdBy?.username == post.username,
+          dateSeparatorLabel: dateSeparatorLabel,
+          showDivider: showDivider,
+          onJumpToPost: onJumpToPost,
+        );
+        break;
+      case _PostRenderSegmentType.longChunk:
+        child = LongPostChunkSegment(
+          post: post,
+          topicId: detail.id,
+          highlight: highlight,
+          chunk: segment.chunkData!,
+          renderData: segment.renderData!,
+          onQuoteImage: onQuoteImage,
+        );
+        break;
+      case _PostRenderSegmentType.longFooter:
+        child = LongPostFooterSegment(
+          post: post,
+          topicId: detail.id,
+          highlight: highlight,
+          topicHasAcceptedAnswer: detail.hasAcceptedAnswer,
+          acceptedAnswerPostNumber: detail.acceptedAnswerPostNumber,
+          bottomDateSeparatorLabel: bottomDateSeparatorLabel,
+          onReply: isLoggedIn ? () => onReply(post.postNumber == 1 ? null : post) : null,
+          onEdit: isLoggedIn && post.canEdit ? () => onEdit(post) : null,
+          onShareAsImage: onShareAsImage != null ? () => onShareAsImage!(post) : null,
+          onRefreshPost: onRefreshPost,
+          onJumpToPost: onJumpToPost,
+          onSolutionChanged: onSolutionChanged,
+        );
+        break;
+    }
+
+    final wrapped = _wrapContent(
       context,
       AutoScrollTag(
-        key: ValueKey('post-${post.postNumber}'),
+        key: ValueKey('segment-${segment.scrollIndex}-${post.postNumber}'),
         controller: scrollController,
-        index: postIndex,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (showDivider)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
-                child: Text(
-                  '上次看到这里',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+        index: segment.scrollIndex,
+        child: segment.type == _PostRenderSegmentType.shortPost
+            ? child
+            : Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: (_) => _rememberLongSelectionPost(post),
+                child: child,
               ),
-            PostItem(
-              post: post,
-              topicId: detail.id,
-              highlight: highlightPostNumber == post.postNumber,
-              isTopicOwner: detail.createdBy?.username == post.username,
-              topicHasAcceptedAnswer: detail.hasAcceptedAnswer,
-              acceptedAnswerPostNumber: detail.acceptedAnswerPostNumber,
-              dateSeparatorLabel: dateSeparatorLabel,
-              bottomDateSeparatorLabel: bottomDateSeparatorLabel,
-              onLike: () => ToastService.showInfo('点赞功能开发中...'),
-              onReply: isLoggedIn ? () => onReply(post.postNumber == 1 ? null : post) : null,
-              onEdit: isLoggedIn && post.canEdit ? () => onEdit(post) : null,
-              onShareAsImage: onShareAsImage != null ? () => onShareAsImage!(post) : null,
-              onRefreshPost: onRefreshPost,
-              onJumpToPost: onJumpToPost,
-              onSolutionChanged: onSolutionChanged,
-              onQuoteSelection: onQuoteSelection,
-              onQuoteImage: onQuoteImage,
-            ),
-          ],
-        ),
       ),
+    );
+
+    return wrapped;
+  }
+}
+
+enum _PostRenderSegmentType { shortPost, longHeader, longChunk, longFooter }
+
+class _PostRenderSegment {
+  final _PostRenderSegmentType type;
+  final int scrollIndex;
+  final int postIndex;
+  final Post post;
+  final int? chunkIndex;
+  final HtmlChunk? chunkData;
+  final LongPostRenderData? renderData;
+
+  const _PostRenderSegment._({
+    required this.type,
+    required this.scrollIndex,
+    required this.postIndex,
+    required this.post,
+    this.chunkIndex,
+    this.chunkData,
+    this.renderData,
+  });
+  factory _PostRenderSegment.shortPost({
+    required int scrollIndex,
+    required int postIndex,
+    required Post post,
+  }) {
+    return _PostRenderSegment._(
+      type: _PostRenderSegmentType.shortPost,
+      scrollIndex: scrollIndex,
+      postIndex: postIndex,
+      post: post,
+    );
+  }
+
+  factory _PostRenderSegment.header({
+    required int scrollIndex,
+    required int postIndex,
+    required Post post,
+  }) {
+    return _PostRenderSegment._(
+      type: _PostRenderSegmentType.longHeader,
+      scrollIndex: scrollIndex,
+      postIndex: postIndex,
+      post: post,
+    );
+  }
+
+  factory _PostRenderSegment.chunk({
+    required int scrollIndex,
+    required int postIndex,
+    required Post post,
+    required int chunkIndex,
+    required HtmlChunk chunkData,
+    required LongPostRenderData renderData,
+  }) {
+    return _PostRenderSegment._(
+      type: _PostRenderSegmentType.longChunk,
+      scrollIndex: scrollIndex,
+      postIndex: postIndex,
+      post: post,
+      chunkIndex: chunkIndex,
+      chunkData: chunkData,
+      renderData: renderData,
+    );
+  }
+
+  factory _PostRenderSegment.footer({
+    required int scrollIndex,
+    required int postIndex,
+    required Post post,
+  }) {
+    return _PostRenderSegment._(
+      type: _PostRenderSegmentType.longFooter,
+      scrollIndex: scrollIndex,
+      postIndex: postIndex,
+      post: post,
     );
   }
 }

@@ -1,18 +1,12 @@
-part of '../post_item.dart';
+part of '../post_footer_section.dart';
 
-// ignore_for_file: invalid_use_of_protected_member
-
-/// 菜单/举报/分享操作
-extension _MenuActions on _PostItemState {
-  /// 分享帖子
+extension _PostFooterMenuActions on _PostFooterSectionState {
   Future<void> _sharePost() async {
-    final post = widget.post;
-    final url = '${AppConstants.baseUrl}/t/${widget.topicId}/${post.postNumber}';
+    final url = '${AppConstants.baseUrl}/t/${widget.topicId}/${widget.post.postNumber}';
     await SharePlus.instance.share(ShareParams(text: url));
   }
 
-  /// 显示举报对话框
-  void _showFlagDialog(BuildContext context, ThemeData theme) {
+  void _showFlagDialog(BuildContext context) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -21,14 +15,11 @@ extension _MenuActions on _PostItemState {
         postId: widget.post.id,
         postUsername: widget.post.username,
         service: _service,
-        onSuccess: () {
-          ToastService.showSuccess('举报已提交');
-        },
+        onSuccess: () => ToastService.showSuccess('举报已提交'),
       ),
     );
   }
 
-  /// 显示删除确认对话框
   void _showDeleteConfirmDialog(BuildContext context, ThemeData theme) {
     showDialog(
       context: context,
@@ -55,7 +46,6 @@ extension _MenuActions on _PostItemState {
     );
   }
 
-  /// 显示扩展菜单
   void _showMoreMenu(BuildContext context, ThemeData theme) {
     final isGuest = ref.read(currentUserProvider).value == null;
 
@@ -72,7 +62,6 @@ extension _MenuActions on _PostItemState {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 编辑（仅当有编辑权限时显示）
               if (widget.post.canEdit && widget.onEdit != null)
                 ListTile(
                   leading: Icon(Icons.edit_outlined, color: theme.colorScheme.primary),
@@ -82,7 +71,6 @@ extension _MenuActions on _PostItemState {
                     widget.onEdit!();
                   },
                 ),
-              // 分享
               ListTile(
                 leading: Icon(Icons.share_outlined, color: theme.colorScheme.onSurface),
                 title: const Text('分享链接'),
@@ -91,7 +79,6 @@ extension _MenuActions on _PostItemState {
                   _sharePost();
                 },
               ),
-              // 生成分享图片
               if (widget.onShareAsImage != null)
                 ListTile(
                   leading: Icon(Icons.image_outlined, color: theme.colorScheme.onSurface),
@@ -101,18 +88,21 @@ extension _MenuActions on _PostItemState {
                     widget.onShareAsImage!();
                   },
                 ),
-              // 打赏 LDC
-              if (!isGuest) ...[
+              if (!isGuest)
                 Builder(
                   builder: (context) {
                     final currentUser = ref.read(currentUserProvider).value;
-                    final isOwnPost = currentUser != null && currentUser.username == widget.post.username;
+                    final isOwnPost =
+                        currentUser != null && currentUser.username == widget.post.username;
                     final credentials = ref.read(ldcRewardCredentialsProvider).value;
                     if (isOwnPost || widget.post.userId == null || credentials == null) {
                       return const SizedBox.shrink();
                     }
                     return ListTile(
-                      leading: Icon(Icons.volunteer_activism_rounded, color: theme.colorScheme.onSurface),
+                      leading: Icon(
+                        Icons.volunteer_activism_rounded,
+                        color: theme.colorScheme.onSurface,
+                      ),
                       title: const Text('打赏 LDC'),
                       onTap: () {
                         Navigator.pop(ctx);
@@ -131,31 +121,32 @@ extension _MenuActions on _PostItemState {
                     );
                   },
                 ),
-              ],
-            if (!isGuest) ...[
-                // 标记解决方案
-                if (widget.post.canAcceptAnswer || widget.post.canUnacceptAnswer)
-                  ListTile(
-                    leading: Icon(
-                      _isAcceptedAnswer ? Icons.check_box : Icons.check_box_outline_blank,
+              if (!isGuest && (widget.post.canAcceptAnswer || widget.post.canUnacceptAnswer))
+                ListTile(
+                  leading: Icon(
+                    _isAcceptedAnswer ? Icons.check_box : Icons.check_box_outline_blank,
+                    color: _isAcceptedAnswer ? Colors.green : theme.colorScheme.onSurface,
+                  ),
+                  title: Text(
+                    _isAcceptedAnswer ? '取消采纳' : '采纳为解决方案',
+                    style: TextStyle(
                       color: _isAcceptedAnswer ? Colors.green : theme.colorScheme.onSurface,
                     ),
-                    title: Text(
-                      _isAcceptedAnswer ? '取消采纳' : '采纳为解决方案',
-                      style: TextStyle(
-                        color: _isAcceptedAnswer ? Colors.green : theme.colorScheme.onSurface,
-                      ),
-                    ),
-                    onTap: _isTogglingAnswer ? null : () {
-                      Navigator.pop(ctx);
-                      _toggleSolution();
-                    },
                   ),
-                // 书签
+                  onTap: _isTogglingAnswer
+                      ? null
+                      : () {
+                          Navigator.pop(ctx);
+                          _toggleSolution();
+                        },
+                ),
+              if (!isGuest)
                 ListTile(
                   leading: Icon(
                     _isBookmarked ? Icons.bookmark : Icons.bookmark_border,
-                    color: _isBookmarked ? theme.colorScheme.primary : theme.colorScheme.onSurface,
+                    color: _isBookmarked
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.onSurface,
                   ),
                   title: Text(_isBookmarked ? '取消书签' : '添加书签'),
                   onTap: () {
@@ -163,38 +154,38 @@ extension _MenuActions on _PostItemState {
                     _toggleBookmark();
                   },
                 ),
-                // 举报
+              if (!isGuest)
                 ListTile(
                   leading: Icon(Icons.flag_outlined, color: theme.colorScheme.error),
                   title: Text('举报', style: TextStyle(color: theme.colorScheme.error)),
                   onTap: () {
                     Navigator.pop(ctx);
-                    _showFlagDialog(context, theme);
+                    _showFlagDialog(context);
                   },
                 ),
-                // 恢复
-                if (widget.post.canRecover)
-                  ListTile(
-                    leading: Icon(Icons.restore, color: theme.colorScheme.primary),
-                    title: Text('恢复', style: TextStyle(color: theme.colorScheme.primary)),
-                    onTap: _isDeleting ? null : () {
-                      Navigator.pop(ctx);
-                      _recoverPost();
-                    },
-                  ),
-                // 删除
-                if (widget.post.canDelete && !widget.post.isDeleted)
-                  ListTile(
-                    leading: Icon(Icons.delete_outline, color: theme.colorScheme.error),
-                    title: Text('删除', style: TextStyle(color: theme.colorScheme.error)),
-                    onTap: _isDeleting ? null : () {
-                      Navigator.pop(ctx);
-                      _showDeleteConfirmDialog(context, theme);
-                    },
-                  ),
-              ],
+              if (!isGuest && widget.post.canRecover)
+                ListTile(
+                  leading: Icon(Icons.restore, color: theme.colorScheme.primary),
+                  title: Text('恢复', style: TextStyle(color: theme.colorScheme.primary)),
+                  onTap: _isDeleting
+                      ? null
+                      : () {
+                          Navigator.pop(ctx);
+                          _recoverPost();
+                        },
+                ),
+              if (!isGuest && widget.post.canDelete && !widget.post.isDeleted)
+                ListTile(
+                  leading: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+                  title: Text('删除', style: TextStyle(color: theme.colorScheme.error)),
+                  onTap: _isDeleting
+                      ? null
+                      : () {
+                          Navigator.pop(ctx);
+                          _showDeleteConfirmDialog(context, theme);
+                        },
+                ),
               const SizedBox(height: 8),
-              // 取消按钮
               ListTile(
                 title: Text(
                   '取消',

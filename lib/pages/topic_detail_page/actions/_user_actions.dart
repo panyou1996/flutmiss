@@ -232,19 +232,31 @@ extension _UserActions on _TopicDetailPageState {
   Future<void> _handleQuoteSelection(String selectedText, Post post) async {
     final params = _params;
     final detail = ref.read(topicDetailProvider(params)).value;
+    final codePayload = CodeSelectionContextTracker.instance.decodePayload(selectedText);
+    final plainSelectedText = codePayload?.text ?? selectedText;
 
     // 尝试从 HTML 提取对应片段并转为 Markdown
     String markdown;
-    final htmlFragment = HtmlTextMapper.extractHtml(post.cooked, selectedText);
+    final htmlFragment = HtmlTextMapper.extractHtml(post.cooked, plainSelectedText);
     if (htmlFragment != null) {
       markdown = HtmlToMarkdown.convert(htmlFragment);
       // 转换失败时降级为纯文本
       if (markdown.trim().isEmpty) {
-        markdown = selectedText;
+        markdown = codePayload != null
+            ? CodeSelectionContextTracker.instance.toMarkdown(
+                plainSelectedText,
+                context: codePayload.context,
+              )
+            : plainSelectedText;
       }
+    } else if (codePayload != null) {
+      markdown = CodeSelectionContextTracker.instance.toMarkdown(
+        plainSelectedText,
+        context: codePayload.context,
+      );
     } else {
       // 映射失败，使用纯文本
-      markdown = selectedText;
+      markdown = plainSelectedText;
     }
 
     // 构建引用格式

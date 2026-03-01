@@ -147,7 +147,7 @@ extension _ScrollActions on _TopicDetailPageState {
 
       if (!forceLocalJump && _controller.isPostRendered(postIndex)) {
         await _controller.scrollController.scrollToIndex(
-          postIndex,
+          _controller.scrollIndexForPostIndex(postIndex),
           preferPosition: AutoScrollPosition.begin,
           duration: const Duration(milliseconds: 1),
         );
@@ -261,7 +261,7 @@ extension _ScrollActions on _TopicDetailPageState {
             );
           } else {
             await _controller.scrollController.scrollToIndex(
-              targetPostIndex,
+              _controller.scrollIndexForPostIndex(targetPostIndex),
               preferPosition: AutoScrollPosition.begin,
               duration: const Duration(milliseconds: 1),
             );

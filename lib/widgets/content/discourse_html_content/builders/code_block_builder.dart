@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import '../../../../pages/image_viewer_page.dart';
 import '../../../../services/highlighter_service.dart';
 import '../../../../services/discourse_cache_manager.dart';
 import '../../../../services/toast_service.dart';
+import '../../../../utils/code_selection_context.dart';
 import '../../lazy_load_scope.dart';
 
 /// 构建代码块
@@ -158,9 +160,19 @@ class _CodeBlockWidgetState extends State<_CodeBlockWidget> {
       Widget buildCodeArea() {
         // 截图模式：隐藏行号（自动换行后行号对不上），代码自动换行，不限制高度
         if (widget.screenshotMode) {
-          return Padding(
-            padding: const EdgeInsets.all(12),
-            child: Text.rich(codeSpan, softWrap: true),
+          return Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (_) {
+              scheduleMicrotask(() {
+                CodeSelectionContextTracker.instance.set(
+                  CodeSelectionContext(language: displayLanguage.toLowerCase()),
+                );
+              });
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text.rich(codeSpan, softWrap: true),
+            ),
           );
         }
 
@@ -178,17 +190,19 @@ class _CodeBlockWidgetState extends State<_CodeBlockWidget> {
                       ? Colors.white.withValues(alpha: 0.02)
                       : Colors.black.withValues(alpha: 0.02),
                 ),
-                child: ScrollConfiguration(
-                  behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-                  child: SingleChildScrollView(
-                    controller: _lineNumberVController,
-                    physics: const NeverScrollableScrollPhysics(),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                      child: Text(
-                        List.generate(lineCount, (i) => (i + 1).toString().padLeft(padWidth)).join('\n'),
-                        style: baseStyle.copyWith(color: lineNumberColor),
-                        textAlign: TextAlign.right,
+                child: SelectionContainer.disabled(
+                  child: ScrollConfiguration(
+                    behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                    child: SingleChildScrollView(
+                      controller: _lineNumberVController,
+                      physics: const NeverScrollableScrollPhysics(),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                        child: Text(
+                          List.generate(lineCount, (i) => (i + 1).toString().padLeft(padWidth)).join('\n'),
+                          style: baseStyle.copyWith(color: lineNumberColor),
+                          textAlign: TextAlign.right,
+                        ),
                       ),
                     ),
                   ),
@@ -196,31 +210,41 @@ class _CodeBlockWidgetState extends State<_CodeBlockWidget> {
               ),
               // 可滚动的代码内容
               Expanded(
-                child: RawScrollbar(
-                  controller: _vController,
-                  thumbVisibility: false,
-                  thickness: 4,
-                  radius: const Radius.circular(2),
-                  padding: const EdgeInsets.only(right: 2, top: 2, bottom: 2),
-                  thumbColor: thumbColor,
-                  child: SingleChildScrollView(
+                child: Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerDown: (_) {
+                    scheduleMicrotask(() {
+                      CodeSelectionContextTracker.instance.set(
+                        CodeSelectionContext(language: displayLanguage.toLowerCase()),
+                      );
+                    });
+                  },
+                  child: RawScrollbar(
                     controller: _vController,
-                    scrollDirection: Axis.vertical,
-                    // 短代码禁止垂直滚动，避免预估高度与实际高度微小误差导致的滑动
-                    physics: needsVerticalScroll ? null : const NeverScrollableScrollPhysics(),
-                    child: RawScrollbar(
-                      controller: _hController,
-                      thumbVisibility: false,
-                      thickness: 4,
-                      padding: const EdgeInsets.only(left: 2, right: 2, bottom: 4),
-                      radius: const Radius.circular(2),
-                      thumbColor: thumbColor,
-                      child: SingleChildScrollView(
+                    thumbVisibility: false,
+                    thickness: 4,
+                    radius: const Radius.circular(2),
+                    padding: const EdgeInsets.only(right: 2, top: 2, bottom: 2),
+                    thumbColor: thumbColor,
+                    child: SingleChildScrollView(
+                      controller: _vController,
+                      scrollDirection: Axis.vertical,
+                      // 短代码禁止垂直滚动，避免预估高度与实际高度微小误差导致的滑动
+                      physics: needsVerticalScroll ? null : const NeverScrollableScrollPhysics(),
+                      child: RawScrollbar(
                         controller: _hController,
-                        scrollDirection: Axis.horizontal,
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Text.rich(codeSpan, softWrap: false),
+                        thumbVisibility: false,
+                        thickness: 4,
+                        padding: const EdgeInsets.only(left: 2, right: 2, bottom: 4),
+                        radius: const Radius.circular(2),
+                        thumbColor: thumbColor,
+                        child: SingleChildScrollView(
+                          controller: _hController,
+                          scrollDirection: Axis.horizontal,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text.rich(codeSpan, softWrap: false),
+                          ),
                         ),
                       ),
                     ),
@@ -252,46 +276,48 @@ class _CodeBlockWidgetState extends State<_CodeBlockWidget> {
                   color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
                   border: Border(bottom: BorderSide(color: borderColor)),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      displayLanguage,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                      ),
-                    ),
-                    InkWell(
-                      onTap: () {
-                        Clipboard.setData(ClipboardData(text: text));
-                        ToastService.showSuccess('已复制代码');
-                      },
-                      borderRadius: BorderRadius.circular(4),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.copy_rounded,
-                              size: 14,
-                              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '复制',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                              ),
-                            ),
-                          ],
+                child: SelectionContainer.disabled(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        displayLanguage,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                         ),
                       ),
-                    ),
-                  ],
+                      InkWell(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(text: text));
+                          ToastService.showSuccess('已复制代码');
+                        },
+                        borderRadius: BorderRadius.circular(4),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.copy_rounded,
+                                size: 14,
+                                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '复制',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               // 代码区域

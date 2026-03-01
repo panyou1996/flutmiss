@@ -59,6 +59,16 @@ class HtmlTextMapper {
       if (involvedNodes.length == 1) {
         final isFullySelected = originalStart <= startNode.offset &&
             originalEnd >= startNode.offset + startNode.length;
+        final codeContainer = _findCodeContainer(startNode.node);
+
+        if (codeContainer != null) {
+          final text = startNode.node.text ?? '';
+          final trimStart = (originalStart - startNode.offset).clamp(0, text.length);
+          final trimEnd = (originalEnd - startNode.offset).clamp(trimStart, text.length);
+          final selectedCode = text.substring(trimStart, trimEnd);
+          if (selectedCode.isEmpty) return null;
+          return _buildPartialCodeHtml(codeContainer, selectedCode);
+        }
 
         if (isFullySelected) {
           // 完整选中：返回父元素 HTML（保留 <b>、<em> 等格式标记）
@@ -82,6 +92,90 @@ class HtmlTextMapper {
     } catch (_) {
       return null;
     }
+  }
+
+  /// 如果节点位于代码块中，返回最外层的代码块容器（优先 pre，其次 code）
+  static dom.Element? _findCodeContainer(dom.Node node) {
+    dom.Node? current = node;
+    dom.Element? codeElement;
+
+    while (current != null) {
+      if (current is dom.Element) {
+        final name = current.localName?.toLowerCase();
+        if (name == 'pre') {
+          return current;
+        }
+        if (name == 'code') {
+          codeElement ??= current;
+        }
+      }
+      current = current.parentNode;
+    }
+
+    return codeElement;
+  }
+
+  /// 构建仅包含选中代码文本的 HTML，保留代码块语义
+  static String _buildPartialCodeHtml(dom.Element container, String selectedCode) {
+    final escapedCode = _escapeHtml(selectedCode);
+    final name = container.localName?.toLowerCase();
+
+    if (name == 'pre') {
+      final codeChild = container.children
+          .where((child) => child.localName?.toLowerCase() == 'code')
+          .firstOrNull;
+      if (codeChild != null) {
+        final codeAttrs = _serializeAttributes(codeChild.attributes);
+        return '<pre><code$codeAttrs>$escapedCode</code></pre>';
+      }
+      return '<pre><code>$escapedCode</code></pre>';
+    }
+
+    final attrs = _serializeAttributes(container.attributes);
+    return '<code$attrs>$escapedCode</code>';
+  }
+
+  static String _extractSelectedTextFromContainer(
+    dom.Element container,
+    List<_TextNodeInfo> involvedNodes,
+    int originalStart,
+    int originalEnd,
+  ) {
+    final textInfos = involvedNodes
+        .where((info) =>
+            info.node.nodeType == dom.Node.TEXT_NODE &&
+            _containsNode(container, info.node))
+        .toList()
+      ..sort((a, b) => a.offset.compareTo(b.offset));
+
+    final buffer = StringBuffer();
+    for (final info in textInfos) {
+      final text = info.node.text ?? '';
+      final trimStart = (originalStart - info.offset).clamp(0, text.length);
+      final trimEnd = (originalEnd - info.offset).clamp(trimStart, text.length);
+      if (trimStart >= trimEnd) continue;
+      buffer.write(text.substring(trimStart, trimEnd));
+    }
+
+    return buffer.toString();
+  }
+
+  static String _serializeAttributes(Map<dynamic, String> attributes) {
+    if (attributes.isEmpty) return '';
+
+    final buffer = StringBuffer();
+    attributes.forEach((key, value) {
+      buffer.write(' $key="${_escapeHtml(value)}"');
+    });
+    return buffer.toString();
+  }
+
+  static String _escapeHtml(String text) {
+    return text
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
   }
 
   /// 从 LCA 中只提取覆盖选中范围的子节点 HTML
@@ -126,9 +220,20 @@ class HtmlTextMapper {
     final buffer = StringBuffer();
     for (int i = startIdx; i <= endIdx; i++) {
       final child = children[i];
+      final isBoundaryChild = i == startIdx || i == endIdx;
 
       if (child is dom.Element) {
-        buffer.write(child.outerHtml);
+        if (isBoundaryChild) {
+          final partial = _extractNodeHtml(
+            child,
+            involvedNodes,
+            originalStart,
+            originalEnd,
+          );
+          buffer.write(partial ?? child.outerHtml);
+        } else {
+          buffer.write(child.outerHtml);
+        }
       } else if (child.nodeType == dom.Node.TEXT_NODE) {
         final text = child.text ?? '';
         // 查找该文本节点对应的偏移信息
@@ -159,6 +264,69 @@ class HtmlTextMapper {
 
     final result = buffer.toString();
     return result.isEmpty ? null : result;
+  }
+
+  /// 递归提取边界节点中实际被选中的 HTML
+  static String? _extractNodeHtml(
+    dom.Node node,
+    List<_TextNodeInfo> involvedNodes,
+    int originalStart,
+    int originalEnd,
+  ) {
+    if (node.nodeType == dom.Node.TEXT_NODE) {
+      final info = involvedNodes.where((n) => identical(n.node, node)).firstOrNull;
+      if (info == null) return null;
+
+      final text = node.text ?? '';
+      final trimStart = (originalStart - info.offset).clamp(0, text.length);
+      final trimEnd = (originalEnd - info.offset).clamp(trimStart, text.length);
+      final selected = text.substring(trimStart, trimEnd);
+      return selected.isEmpty ? null : selected;
+    }
+
+    if (node is! dom.Element) return null;
+
+    final name = node.localName?.toLowerCase();
+    if (name == 'pre' || name == 'code') {
+      final selectedCode = _extractSelectedTextFromContainer(
+        node,
+        involvedNodes,
+        originalStart,
+        originalEnd,
+      );
+      if (selectedCode.isEmpty) return null;
+      return _buildPartialCodeHtml(node, selectedCode);
+    }
+
+    final buffer = StringBuffer();
+    for (final child in node.nodes) {
+      if (!_containsAnyInvolvedNode(child, involvedNodes)) continue;
+
+      final extracted = _extractNodeHtml(
+        child,
+        involvedNodes,
+        originalStart,
+        originalEnd,
+      );
+      if (extracted != null) {
+        buffer.write(extracted);
+      }
+    }
+
+    final innerHtml = buffer.toString();
+    if (innerHtml.isEmpty) return null;
+
+    final attrs = _serializeAttributes(node.attributes);
+    return '<${node.localName}$attrs>$innerHtml</${node.localName}>';
+  }
+
+  static bool _containsAnyInvolvedNode(dom.Node parent, List<_TextNodeInfo> involvedNodes) {
+    for (final info in involvedNodes) {
+      if (_containsNode(parent, info.node)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// 检查 parent 是否包含 target 节点（包括 parent 自身）
