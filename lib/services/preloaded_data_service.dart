@@ -92,6 +92,21 @@ class PreloadedDataService {
     return _site?['system_user_avatar_template'] as String?;
   }
 
+  /// 同步获取分类 ID 集合（预加载数据已加载后可用，用于 Tab 过滤）
+  Set<int>? get categoryIdsSync {
+    if (_site == null) return null;
+    try {
+      final categoriesJson = _site!['categories'] as List?;
+      if (categoriesJson != null) {
+        return categoriesJson
+            .map((c) => int.tryParse((c as Map<String, dynamic>)['id']?.toString() ?? '0') ?? 0)
+            .where((id) => id != 0)
+            .toSet();
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// 获取分类列表（从预加载的 site 数据中提取）
   Future<List<Category>?> getCategories() async {
     await _ensureLoaded();

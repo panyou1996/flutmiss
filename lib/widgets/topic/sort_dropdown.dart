@@ -37,7 +37,7 @@ class SortDropdown extends StatelessWidget {
       tooltip: '排序: ${sortLabel(currentSort)}',
       itemBuilder: (context) {
         return sortOptions
-            .where((option) => isLoggedIn || (option.$1 != TopicListFilter.unread && option.$1 != TopicListFilter.unseen))
+            .where((option) => isLoggedIn || (option.$1 != TopicListFilter.newTopics && option.$1 != TopicListFilter.unread && option.$1 != TopicListFilter.unseen))
             .map((option) => PopupMenuItem<TopicListFilter>(
                   value: option.$1,
                   child: Row(

@@ -38,3 +38,7 @@ final tabTagsProvider = StateProvider.family<List<String>, int?>((ref, categoryI
 
 /// 当前选中 tab 对应的分类 ID（null 表示"全部"tab）
 final currentTabCategoryIdProvider = StateProvider<int?>((ref) => null);
+
+/// 话题列表 tab 失活信号
+/// refreshAll 时递增，通知非当前 tab 释放 keepAlive
+final topicTabDeactivateSignal = StateProvider<int>((ref) => 0);

@@ -74,65 +74,6 @@ final messageBusInitProvider = NotifierProvider<MessageBusInitNotifier, void>(
   MessageBusInitNotifier.new,
 );
 
-/// 话题追踪频道监听器
-/// 订阅 /latest, /new, /unread 等频道，用于实时更新话题列表
-class TopicTrackingChannelsNotifier extends Notifier<void> {
-  final Map<String, MessageBusCallback> _subscriptions = {};
-  
-  @override
-  void build() {
-    final messageBus = ref.watch(messageBusServiceProvider);
-    final currentUser = ref.watch(currentUserProvider).value;
-    final metaAsync = ref.watch(topicTrackingStateMetaProvider);
-    
-    // 清理之前的订阅
-    if (_subscriptions.isNotEmpty) {
-      debugPrint('[TopicTracking] 清理旧订阅: ${_subscriptions.keys}');
-      for (final entry in _subscriptions.entries) {
-        messageBus.unsubscribe(entry.key, entry.value);
-      }
-      _subscriptions.clear();
-    }
-    
-    if (currentUser == null) {
-      debugPrint('[TopicTracking] 用户未登录，跳过订阅');
-      return;
-    }
-    
-    final meta = metaAsync.value;
-    if (meta == null || meta.isEmpty) {
-      debugPrint('[TopicTracking] topicTrackingStateMeta 未加载或为空');
-      return;
-    }
-    
-    debugPrint('[TopicTracking] 订阅频道: ${meta.keys}');
-    
-    for (final entry in meta.entries) {
-      final channel = entry.key;
-      final messageId = entry.value as int;
-      
-      void onMessage(MessageBusMessage message) {
-        debugPrint('[TopicTracking] 收到消息: ${message.channel} #${message.messageId}');
-      }
-      
-      _subscriptions[channel] = onMessage;
-      messageBus.subscribeWithMessageId(channel, onMessage, messageId);
-    }
-    
-    ref.onDispose(() {
-      debugPrint('[TopicTracking] 取消所有订阅: ${_subscriptions.keys}');
-      for (final entry in _subscriptions.entries) {
-        messageBus.unsubscribe(entry.key, entry.value);
-      }
-      _subscriptions.clear();
-    });
-  }
-}
-
-final topicTrackingChannelsProvider = NotifierProvider<TopicTrackingChannelsNotifier, void>(
-  TopicTrackingChannelsNotifier.new,
-);
-
 /// 话题列表新消息状态（按分类隔离）
 class TopicListIncomingState {
   /// topicId → categoryId 的映射，用于按 tab/分类隔离新话题指示器

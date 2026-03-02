@@ -503,6 +503,37 @@ class CookieJarService {
   /// 获取 cf_clearance
   Future<String?> getCfClearance() => getCookieValue('cf_clearance');
 
+  /// 获取 cf_clearance 的原始 Cookie 对象（保留 domain、expires 等属性）
+  Future<io.Cookie?> getCfClearanceCookie() async {
+    if (!_initialized) await initialize();
+    try {
+      final uri = Uri.parse(AppConstants.baseUrl);
+      final cookies = await _cookieJar!.loadForRequest(uri);
+      io.Cookie? fallback;
+      for (final cookie in cookies) {
+        if (cookie.name == 'cf_clearance') {
+          if (cookie.domain != null) return cookie;
+          fallback ??= cookie;
+        }
+      }
+      return fallback;
+    } catch (e) {
+      debugPrint('[CookieJar] Failed to get cf_clearance cookie: $e');
+    }
+    return null;
+  }
+
+  /// 恢复 cf_clearance（登出清除 cookie 后调用）
+  Future<void> restoreCfClearance(io.Cookie cookie) async {
+    if (!_initialized) await initialize();
+    try {
+      final uri = Uri.parse(AppConstants.baseUrl);
+      await _cookieJar!.saveFromResponse(uri, [cookie]);
+    } catch (e) {
+      debugPrint('[CookieJar] Failed to restore cf_clearance: $e');
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // 私有工具方法
   // ---------------------------------------------------------------------------

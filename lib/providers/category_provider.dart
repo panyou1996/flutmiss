@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import '../models/category.dart';
 import '../models/topic.dart';
+import '../services/preloaded_data_service.dart';
 import 'core_providers.dart';
 
 class ActiveCategorySlugsNotifier extends Notifier<Set<String>> {
@@ -38,6 +39,18 @@ final categoryMapProvider = Provider<AsyncValue<Map<int, Category>>>((ref) {
   return categoriesAsync.whenData((categories) {
     return {for (var c in categories) c.id: c};
   });
+});
+
+/// 可见分类 ID 集合（同步，用于 Tab 过滤）
+/// 优先从已加载的 categoriesProvider 获取，加载中时从预加载数据同步提取
+final visibleCategoryIdsProvider = Provider<Set<int>?>((ref) {
+  final categoriesAsync = ref.watch(categoriesProvider);
+  final fromProvider = categoriesAsync.whenOrNull(
+    data: (categories) => {for (var c in categories) c.id},
+  );
+  if (fromProvider != null) return fromProvider;
+  // 加载中时从预加载数据同步获取
+  return PreloadedDataService().categoryIdsSync;
 });
 
 /// 分类通知级别本地覆盖（categoryId -> level）

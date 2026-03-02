@@ -91,7 +91,9 @@ class MessageBusService {
       _startPolling();
     } else {
       // 中止当前请求，轮询循环会自然重启并包含新频道
-      _currentCancelToken?.cancel();
+      final token = _currentCancelToken;
+      _currentCancelToken = null;
+      token?.cancel();
     }
   }
 
@@ -133,7 +135,9 @@ class MessageBusService {
       _startPolling();
     } else {
       // 中止当前请求，轮询循环会自然重启并包含新频道
-      _currentCancelToken?.cancel();
+      final token = _currentCancelToken;
+      _currentCancelToken = null;
+      token?.cancel();
     }
   }
 
@@ -357,7 +361,9 @@ class MessageBusService {
     debugPrint('[MessageBus] 退出后台模式，立即恢复轮询');
     if (_isPolling) {
       // 取消可能正在等待的后台间隔延迟或长轮询请求，立即重新轮询
-      _currentCancelToken?.cancel();
+      final token = _currentCancelToken;
+      _currentCancelToken = null;
+      token?.cancel();
     } else if (_subscriptions.isNotEmpty) {
       _startPolling();
     }

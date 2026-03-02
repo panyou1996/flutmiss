@@ -74,6 +74,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
   late TabController _tabController;
   int _tabLength = 1; // 初始只有"全部"
   int _currentTabIndex = 0;
+  List<int> _visiblePinnedIds = []; // 过滤后的可见分类 ID
   final Map<int?, GlobalKey<_TopicListState>> _listKeys = {};
 
   final ScrollController _outerScrollController = ScrollController();
@@ -83,8 +84,8 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
   @override
   void initState() {
     super.initState();
-    final pinnedIds = ref.read(pinnedCategoriesProvider);
-    _tabLength = 1 + pinnedIds.length;
+    _visiblePinnedIds = ref.read(pinnedCategoriesProvider);
+    _tabLength = 1 + _visiblePinnedIds.length;
     _tabController = TabController(length: _tabLength, vsync: this);
     _tabController.addListener(_handleTabChange);
   }
@@ -110,6 +111,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
   /// 检测 pinnedCategories 变化，重建 TabController
   void _syncTabsIfNeeded(List<int> pinnedIds) {
     final desiredLength = 1 + pinnedIds.length;
+    _visiblePinnedIds = pinnedIds;
     if (desiredLength == _tabLength) return;
 
     // 清理已移除分类的 key
@@ -202,8 +204,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
 
     // 如果返回了 category ID，切换到对应的 Tab
     if (categoryId != null && mounted) {
-      final pinnedIds = ref.read(pinnedCategoriesProvider);
-      final tabIndex = pinnedIds.indexOf(categoryId);
+      final tabIndex = _visiblePinnedIds.indexOf(categoryId);
       if (tabIndex >= 0) {
         _tabController.animateTo(tabIndex + 1); // +1 因为"全部"在 index 0
       }
@@ -246,11 +247,11 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
   }
 
   /// 获取当前 tab 对应的 categoryId
-  int? _currentCategoryId() {
+  int? _currentCategoryId([List<int>? pinnedIds]) {
     if (_currentTabIndex == 0) return null;
-    final pinnedIds = ref.read(pinnedCategoriesProvider);
-    if (_currentTabIndex - 1 < pinnedIds.length) {
-      return pinnedIds[_currentTabIndex - 1];
+    final List<int> ids = pinnedIds ?? _visiblePinnedIds;
+    if (_currentTabIndex - 1 < ids.length) {
+      return ids[_currentTabIndex - 1];
     }
     return null;
   }
@@ -348,23 +349,31 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
   Widget build(BuildContext context) {
     final topPadding = MediaQuery.of(context).padding.top;
     final isLoggedIn = ref.watch(currentUserProvider).value != null;
-    final pinnedIds = ref.watch(pinnedCategoriesProvider);
+    final allPinnedIds = ref.watch(pinnedCategoriesProvider);
     final categoryMapAsync = ref.watch(categoryMapProvider);
+    final categoryMap = categoryMapAsync.value;
+    // 过滤掉当前用户无权限访问的分类（不在可见分类集合中的）
+    final visibleIds = ref.watch(visibleCategoryIdsProvider);
+    final pinnedIds = visibleIds != null
+        ? allPinnedIds.where((id) => visibleIds.contains(id)).toList()
+        : allPinnedIds;
     final currentSort = ref.watch(topicSortProvider);
-    final currentCategoryId = _currentCategoryId();
-    final currentTags = ref.watch(tabTagsProvider(currentCategoryId));
 
     _syncTabsIfNeeded(pinnedIds);
 
-    final currentCategory = _getCurrentCategory(pinnedIds, categoryMapAsync.value);
+    final currentCategoryId = _currentCategoryId(pinnedIds);
+    final currentTags = ref.watch(tabTagsProvider(currentCategoryId));
+    final currentCategory = _getCurrentCategory(pinnedIds, categoryMap);
 
     // 监听滚动到顶部的通知
     ref.listen(scrollToTopProvider, (previous, next) {
-      _outerScrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      if (_outerScrollController.hasClients && _outerScrollController.positions.length == 1) {
+        _outerScrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
       _getListKey(_currentCategoryId()).currentState?.scrollToTop();
     });
 
@@ -372,7 +381,11 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
       onPointerDown: (_) => _cancelSnap(),
       child: NotificationListener<ScrollNotification>(
         onNotification: _handleOuterScrollNotification,
-        child: ExtendedNestedScrollView(
+        child: ScrollConfiguration(
+          // 禁用自动 Scrollbar，避免 NestedScrollView + TabBarView
+          // 多个 ScrollPosition 同时存在时 Scrollbar 报错
+          behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+          child: ExtendedNestedScrollView(
           controller: _outerScrollController,
           floatHeaderSlivers: true,
           pinnedHeaderSliverHeightBuilder: () => topPadding + _tabRowHeight,
@@ -385,7 +398,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
                 statusBarHeight: topPadding,
                 tabController: _tabController,
                 pinnedIds: pinnedIds,
-                categoryMap: categoryMapAsync.value ?? {},
+                categoryMap: categoryMap ?? {},
                 isLoggedIn: isLoggedIn,
                 currentSort: currentSort,
                 currentTags: currentTags,
@@ -410,7 +423,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
                   if (currentCategory != null) {
                     String? parentSlug;
                     if (currentCategory.parentCategoryId != null) {
-                      parentSlug = categoryMapAsync.value?[currentCategory.parentCategoryId]?.slug;
+                      parentSlug = categoryMap?[currentCategory.parentCategoryId]?.slug;
                     }
                     filter = SearchFilter(
                       categoryId: currentCategory.id,
@@ -444,6 +457,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
             ],
           ),
         ),
+        ),
       ),
     );
   }
@@ -473,6 +487,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
   /// 避免触发 coordinator 的 beginActivity/goIdle 导致内部列表位置重置。
   void _snapOuterScroll() {
     if (!_outerScrollController.hasClients) return;
+    if (_outerScrollController.positions.length != 1) return;
     final offset = _outerScrollController.offset;
     if (offset <= 0 || offset >= _collapsibleHeight) return;
 
@@ -488,6 +503,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
 
     _snapAnim!.addListener(() {
       if (!_outerScrollController.hasClients) return;
+      if (_outerScrollController.positions.length != 1) return;
       final t = Curves.easeOut.transform(_snapAnim!.value);
       final newOffset = startOffset + (target - startOffset) * t;
       _outerScrollController.position.snapToPixels(newOffset);
@@ -752,9 +768,10 @@ class _TopicList extends ConsumerStatefulWidget {
 class _TopicListState extends ConsumerState<_TopicList>
     with AutomaticKeepAliveClientMixin {
   bool _isLoadingNewTopics = false;
+  bool _keepAlive = true;
 
   @override
-  bool get wantKeepAlive => true;
+  bool get wantKeepAlive => _keepAlive;
 
   /// 列表区域顶部圆角
   static const _topBorderRadius = BorderRadius.only(
@@ -798,6 +815,16 @@ class _TopicListState extends ConsumerState<_TopicList>
   @override
   Widget build(BuildContext context) {
     super.build(context); // AutomaticKeepAliveClientMixin 需要
+
+    // 监听 refreshAll 的失活信号，非当前 tab 释放 keepAlive
+    ref.listen(topicTabDeactivateSignal, (_, __) {
+      final currentCategoryId = ref.read(currentTabCategoryIdProvider);
+      if (widget.categoryId != currentCategoryId) {
+        _keepAlive = false;
+        updateKeepAlive();
+      }
+    });
+
     final currentSort = ref.watch(topicSortProvider);
     final selectedTopicId = ref.watch(selectedTopicProvider).topicId;
     final providerKey = (currentSort, widget.categoryId);

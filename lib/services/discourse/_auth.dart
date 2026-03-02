@@ -165,7 +165,12 @@ mixin _AuthMixin on _DiscourseServiceBase {
     _credentialsLoaded = false;
 
     PreloadedDataService().reset();
+    // 保留 cf_clearance 避免清除 cookie 后触发 Cloudflare 盾
+    final cfClearanceCookie = await _cookieJar.getCfClearanceCookie();
     await _cookieJar.clearAll();
+    if (cfClearanceCookie != null) {
+      await _cookieJar.restoreCfClearance(cfClearanceCookie);
+    }
 
     if (refreshPreload) {
       await PreloadedDataService().refresh();

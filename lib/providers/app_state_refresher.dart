@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core_providers.dart';
 import 'notification_list_provider.dart';
@@ -21,8 +22,8 @@ class AppStateRefresher {
   }
 
   static Future<void> resetForLogout(WidgetRef ref) async {
-    refreshAll(ref);
     ref.read(topicSortProvider.notifier).setSort(TopicListFilter.latest);
+    refreshAll(ref);
     // 清理各 tab 的标签筛选
     final pinnedIds = ref.read(pinnedCategoriesProvider);
     ref.read(tabTagsProvider(null).notifier).state = [];
@@ -54,21 +55,28 @@ class AppStateRefresher {
     (ref) => ref.invalidate(notificationCountStateProvider),
     (ref) => ref.invalidate(notificationChannelProvider),
     (ref) => ref.invalidate(notificationAlertChannelProvider),
-    (ref) => ref.invalidate(topicTrackingChannelsProvider),
     (ref) => ref.invalidate(latestChannelProvider),
     (ref) => ref.invalidate(messageBusInitProvider),
     (ref) => ref.invalidate(ldcUserInfoProvider),
     (ref) => ref.invalidate(cdkUserInfoProvider),
+    // 当前 tab 立即 invalidate；非当前 tab 先释放 keepAlive，
+    // 延迟到下一帧 widget 被销毁后再 invalidate，避免触发请求
     (ref) {
+      final currentSort = ref.read(topicSortProvider);
+      final currentCategoryId = ref.read(currentTabCategoryIdProvider);
+      ref.invalidate(topicListProvider((currentSort, currentCategoryId)));
+
+      ref.read(topicTabDeactivateSignal.notifier).state++;
+
       final pinnedIds = ref.read(pinnedCategoriesProvider);
-      for (final sort in TopicListFilter.values) {
-        // 全部 tab
-        ref.invalidate(topicListProvider((sort, null)));
-        // 各分类 tab
-        for (final id in pinnedIds) {
-          ref.invalidate(topicListProvider((sort, id)));
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        for (final sort in TopicListFilter.values) {
+          for (final categoryId in [null, ...pinnedIds]) {
+            if (sort == currentSort && categoryId == currentCategoryId) continue;
+            ref.invalidate(topicListProvider((sort, categoryId)));
+          }
         }
-      }
+      });
     },
   ];
 }
