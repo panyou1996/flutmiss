@@ -645,23 +645,26 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage>
     final double pinnedHeaderHeight = kToolbarHeight + MediaQuery.of(context).padding.top + 36; // 36 是 TabBar 高度
 
     return Scaffold(
-      body: ExtendedNestedScrollView(
-        controller: _scrollController,
-        pinnedHeaderSliverHeightBuilder: () => pinnedHeaderHeight,
-        onlyOneScrollInBody: true,
-        headerSliverBuilder: (context, innerBoxIsScrolled) => [
-          _buildSliverAppBar(context, theme, currentUser),
-        ],
-        body: TabBarView(
-          controller: _tabController,
-          children: _tabFilters.asMap().entries.map((entry) {
-            final index = entry.key;
-            final filter = entry.value;
-            return ExtendedVisibilityDetector(
-              uniqueKey: Key('tab_$index'),
-              child: _buildActionList(filter),
-            );
-          }).toList(),
+      body: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: ExtendedNestedScrollView(
+          controller: _scrollController,
+          pinnedHeaderSliverHeightBuilder: () => pinnedHeaderHeight,
+          onlyOneScrollInBody: true,
+          headerSliverBuilder: (context, innerBoxIsScrolled) => [
+            _buildSliverAppBar(context, theme, currentUser),
+          ],
+          body: TabBarView(
+            controller: _tabController,
+            children: _tabFilters.asMap().entries.map((entry) {
+              final index = entry.key;
+              final filter = entry.value;
+              return ExtendedVisibilityDetector(
+                uniqueKey: Key('tab_$index'),
+                child: _buildActionList(filter),
+              );
+            }).toList(),
+          ),
         ),
       ),
     );
