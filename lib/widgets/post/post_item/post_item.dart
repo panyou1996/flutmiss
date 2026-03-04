@@ -101,13 +101,15 @@ class _PostItemState extends ConsumerState<PostItem> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            PostHeaderSection(
-              post: post,
-              topicId: widget.topicId,
-              isTopicOwner: widget.isTopicOwner,
-              showStamp: _acceptedAnswer,
-              padding: EdgeInsets.zero,
-              onJumpToPost: widget.onJumpToPost,
+            SelectionContainer.disabled(
+              child: PostHeaderSection(
+                post: post,
+                topicId: widget.topicId,
+                isTopicOwner: widget.isTopicOwner,
+                showStamp: _acceptedAnswer,
+                padding: EdgeInsets.zero,
+                onJumpToPost: widget.onJumpToPost,
+              ),
             ),
             const SizedBox(height: 12),
             Container(
@@ -174,51 +176,55 @@ class _PostItemState extends ConsumerState<PostItem> {
             ),
             // 举报隐藏帖子：显示展开按钮
             if (post.cookedHidden && post.canSeeHiddenPost && widget.onExpandHiddenPost != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: InkWell(
-                  onTap: () => widget.onExpandHiddenPost!(post.id),
-                  borderRadius: BorderRadius.circular(6),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.visibility_outlined,
-                          size: 15,
-                          color: theme.colorScheme.primary,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '查看隐藏的信息',
-                          style: theme.textTheme.labelSmall?.copyWith(
+              SelectionContainer.disabled(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: InkWell(
+                    onTap: () => widget.onExpandHiddenPost!(post.id),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.visibility_outlined,
+                            size: 15,
                             color: theme.colorScheme.primary,
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 4),
+                          Text(
+                            '查看隐藏的信息',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            PostFooterSection(
-              post: post,
-              topicId: widget.topicId,
-              topicHasAcceptedAnswer: widget.topicHasAcceptedAnswer,
-              acceptedAnswerPostNumber: widget.acceptedAnswerPostNumber,
-              padding: const EdgeInsets.only(top: 12),
-              onReply: widget.onReply,
-              onEdit: widget.onEdit,
-              onShareAsImage: widget.onShareAsImage,
-              onRefreshPost: widget.onRefreshPost,
-              onJumpToPost: widget.onJumpToPost,
-              onSolutionChanged: widget.onSolutionChanged,
-              onAcceptedAnswerChanged: (accepted) {
-                if (!mounted) return;
-                setState(() {
-                  _acceptedAnswer = accepted;
-                });
-              },
+            SelectionContainer.disabled(
+              child: PostFooterSection(
+                post: post,
+                topicId: widget.topicId,
+                topicHasAcceptedAnswer: widget.topicHasAcceptedAnswer,
+                acceptedAnswerPostNumber: widget.acceptedAnswerPostNumber,
+                padding: const EdgeInsets.only(top: 12),
+                onReply: widget.onReply,
+                onEdit: widget.onEdit,
+                onShareAsImage: widget.onShareAsImage,
+                onRefreshPost: widget.onRefreshPost,
+                onJumpToPost: widget.onJumpToPost,
+                onSolutionChanged: widget.onSolutionChanged,
+                onAcceptedAnswerChanged: (accepted) {
+                  if (!mounted) return;
+                  setState(() {
+                    _acceptedAnswer = accepted;
+                  });
+                },
+              ),
             ),
           ],
         ),

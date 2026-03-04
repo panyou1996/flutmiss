@@ -436,12 +436,14 @@ class _TopicPostListState extends State<TopicPostList> {
             SliverToBoxAdapter(
               child: _wrapContent(
                 context,
-                TopicDetailHeader(
-                  detail: detail,
-                  headerKey: headerKey,
-                  onVoteChanged: onVoteChanged,
-                  onNotificationLevelChanged: onNotificationLevelChanged,
-                  onJumpToPost: onJumpToPost,
+                SelectionContainer.disabled(
+                  child: TopicDetailHeader(
+                    detail: detail,
+                    headerKey: headerKey,
+                    onVoteChanged: onVoteChanged,
+                    onNotificationLevelChanged: onNotificationLevelChanged,
+                    onJumpToPost: onJumpToPost,
+                  ),
                 ),
               ),
             ),
@@ -469,12 +471,14 @@ class _TopicPostListState extends State<TopicPostList> {
                 SliverToBoxAdapter(
                   child: _wrapContent(
                     context,
-                    TopicDetailHeader(
-                      detail: detail,
-                      headerKey: headerKey,
-                      onVoteChanged: onVoteChanged,
-                      onNotificationLevelChanged: onNotificationLevelChanged,
-                      onJumpToPost: onJumpToPost,
+                    SelectionContainer.disabled(
+                      child: TopicDetailHeader(
+                        detail: detail,
+                        headerKey: headerKey,
+                        onVoteChanged: onVoteChanged,
+                        onNotificationLevelChanged: onNotificationLevelChanged,
+                        onJumpToPost: onJumpToPost,
+                      ),
                     ),
                   ),
                 ),
@@ -500,10 +504,12 @@ class _TopicPostListState extends State<TopicPostList> {
             SliverToBoxAdapter(
               child: _wrapContent(
                 context,
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 200),
-                  alignment: Alignment.topCenter,
-                  child: TypingAvatars(users: typingUsers),
+                SelectionContainer.disabled(
+                  child: AnimatedSize(
+                    duration: const Duration(milliseconds: 200),
+                    alignment: Alignment.topCenter,
+                    child: TypingAvatars(users: typingUsers),
+                  ),
                 ),
               ),
             ),
@@ -616,15 +622,19 @@ class _TopicPostListState extends State<TopicPostList> {
         );
         break;
       case _PostRenderSegmentType.gapBefore:
-        child = _GapIndicator(
-          count: segment.gapCount,
-          onTap: onFillGapBefore != null ? () => onFillGapBefore!(post.id) : null,
+        child = SelectionContainer.disabled(
+          child: _GapIndicator(
+            count: segment.gapCount,
+            onTap: onFillGapBefore != null ? () => onFillGapBefore!(post.id) : null,
+          ),
         );
         break;
       case _PostRenderSegmentType.gapAfter:
-        child = _GapIndicator(
-          count: segment.gapCount,
-          onTap: onFillGapAfter != null ? () => onFillGapAfter!(post.id) : null,
+        child = SelectionContainer.disabled(
+          child: _GapIndicator(
+            count: segment.gapCount,
+            onTap: onFillGapAfter != null ? () => onFillGapAfter!(post.id) : null,
+          ),
         );
         break;
     }

@@ -72,13 +72,15 @@ class LongPostHeaderSegment extends StatelessWidget {
       topDateSeparatorLabel: dateSeparatorLabel,
       showDivider: showDivider,
       showBottomBorder: false,
-      child: PostHeaderSection(
-        post: post,
-        topicId: topicId,
-        isTopicOwner: isTopicOwner,
-        showStamp: post.acceptedAnswer,
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-        onJumpToPost: onJumpToPost,
+      child: SelectionContainer.disabled(
+        child: PostHeaderSection(
+          post: post,
+          topicId: topicId,
+          isTopicOwner: isTopicOwner,
+          showStamp: post.acceptedAnswer,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          onJumpToPost: onJumpToPost,
+        ),
       ),
     );
   }
@@ -194,18 +196,20 @@ class LongPostFooterSegment extends StatelessWidget {
       highlight: highlight,
       showBottomDateSeparator: bottomDateSeparatorLabel != null,
       bottomDateSeparatorLabel: bottomDateSeparatorLabel,
-      child: PostFooterSection(
-        post: post,
-        topicId: topicId,
-        topicHasAcceptedAnswer: topicHasAcceptedAnswer,
-        acceptedAnswerPostNumber: acceptedAnswerPostNumber,
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-        onReply: onReply,
-        onEdit: onEdit,
-        onShareAsImage: onShareAsImage,
-        onRefreshPost: onRefreshPost,
-        onJumpToPost: onJumpToPost,
-        onSolutionChanged: onSolutionChanged,
+      child: SelectionContainer.disabled(
+        child: PostFooterSection(
+          post: post,
+          topicId: topicId,
+          topicHasAcceptedAnswer: topicHasAcceptedAnswer,
+          acceptedAnswerPostNumber: acceptedAnswerPostNumber,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          onReply: onReply,
+          onEdit: onEdit,
+          onShareAsImage: onShareAsImage,
+          onRefreshPost: onRefreshPost,
+          onJumpToPost: onJumpToPost,
+          onSolutionChanged: onSolutionChanged,
+        ),
       ),
     );
   }

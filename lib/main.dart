@@ -119,6 +119,17 @@ Future<void> main() async {
     }
   });
 
+  // 过滤 Flutter 框架已知 bug（https://github.com/flutter/flutter/issues/115787）
+  // SelectionArea + CustomScrollView 拖选时触发的断言错误，仅 debug 模式出现
+  bool filterKnownFrameworkBugs(Report report) {
+    final error = report.error;
+    if (error is AssertionError &&
+        error.message?.toString().contains('Drag target size is larger than scrollable size') == true) {
+      return false;
+    }
+    return true;
+  }
+
   // 配置 Catcher2 全局异常捕获
   final debugConfig = Catcher2Options(
     SilentReportMode(),
@@ -127,6 +138,7 @@ Future<void> main() async {
       JsonFileHandler(),
     ],
     handlerTimeout: 10000,
+    filterFunction: filterKnownFrameworkBugs,
   );
   final releaseConfig = Catcher2Options(
     SilentReportMode(),
@@ -134,6 +146,7 @@ Future<void> main() async {
       JsonFileHandler(),
     ],
     handlerTimeout: 10000,
+    filterFunction: filterKnownFrameworkBugs,
   );
 
   Catcher2(
