@@ -1,4 +1,3 @@
-import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core_providers.dart';
 import 'notification_list_provider.dart';
@@ -66,19 +65,19 @@ class AppStateRefresher {
   }
 
   /// 刷新话题列表各 tab
+  /// 只刷新当前 tab，非活跃 tab 标记 stale，切换到时才刷新
   static void _refreshTopicTabs(WidgetRef ref) {
     final currentCategoryId = ref.read(currentTabCategoryIdProvider);
     ref.invalidate(topicListProvider(currentCategoryId));
 
-    ref.read(topicTabDeactivateSignal.notifier).state++;
-
+    // 非当前 tab 标记 stale，不发请求
     final pinnedIds = ref.read(pinnedCategoriesProvider);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      for (final categoryId in [null, ...pinnedIds]) {
-        if (categoryId == currentCategoryId) continue;
-        ref.invalidate(topicListProvider(categoryId));
-      }
-    });
+    final staleTabs = <int?>{};
+    for (final categoryId in [null, ...pinnedIds]) {
+      if (categoryId == currentCategoryId) continue;
+      staleTabs.add(categoryId);
+    }
+    ref.read(staleTabsProvider.notifier).state = staleTabs;
   }
 
   /// 第一批：主页渲染必需的 provider

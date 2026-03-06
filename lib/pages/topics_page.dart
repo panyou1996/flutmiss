@@ -84,7 +84,6 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
   int _tabLength = 1; // 初始只有"全部"
   int _currentTabIndex = 0;
   List<int> _visiblePinnedIds = []; // 过滤后的可见分类 ID
-  final Map<int?, GlobalKey<_TopicListState>> _listKeys = {};
 
   final ScrollController _outerScrollController = ScrollController();
   AnimationController? _snapAnim;
@@ -109,7 +108,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
     super.dispose();
   }
 
-  /// 全局筛选/排序变化时：刷新当前 tab，释放并清除非活跃 tab 数据
+  /// 全局筛选/排序变化时：刷新当前 tab，非活跃 tab 标记 stale
   /// 使用微任务去抖，避免多个参数连续变化时重复请求（如登出时重置筛选+排序+方向）
   void _invalidateTopicTabs(List<int> pinnedIds) {
     if (_invalidateScheduled) return;
@@ -120,15 +119,14 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
       final currentCategoryId = _currentCategoryId(pinnedIds);
       // 当前活跃 tab：调用 refresh() 显式设置纯 loading 状态，确保骨架屏显示
       ref.read(topicListProvider(currentCategoryId).notifier).refresh();
-      // 非活跃 tab：先释放 keepAlive，延迟到 widget 销毁后再 invalidate
-      ref.read(topicTabDeactivateSignal.notifier).state++;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        for (final categoryId in [null, ...pinnedIds]) {
-          if (categoryId == currentCategoryId) continue;
-          ref.invalidate(topicListProvider(categoryId));
-        }
-      });
+      // 非活跃 tab：标记 stale，切换时再刷新
+      final staleTabs = <int?>{};
+      for (final categoryId in [null, ...pinnedIds]) {
+        if (categoryId == currentCategoryId) continue;
+        staleTabs.add(categoryId);
+      }
+      final existing = ref.read(staleTabsProvider);
+      ref.read(staleTabsProvider.notifier).state = {...existing, ...staleTabs};
     });
   }
 
@@ -139,6 +137,15 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
       _currentTabIndex = _tabController.index;
     });
     final categoryId = _currentCategoryId();
+
+    // 先处理 stale：在设置 currentTab 之前调用 refresh()，
+    // 这样 widget rebuild 时 provider 已处于 loading 状态，不会闪旧数据
+    final staleTabs = ref.read(staleTabsProvider);
+    if (staleTabs.contains(categoryId)) {
+      ref.read(topicListProvider(categoryId).notifier).refresh();
+      ref.read(staleTabsProvider.notifier).state = staleTabs.difference({categoryId});
+    }
+
     ref.read(currentTabCategoryIdProvider.notifier).state = categoryId;
   }
 
@@ -147,10 +154,6 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
     final desiredLength = 1 + pinnedIds.length;
     _visiblePinnedIds = pinnedIds;
     if (desiredLength == _tabLength) return;
-
-    // 清理已移除分类的 key
-    final activeCategoryIds = <int?>{null, ...pinnedIds};
-    _listKeys.removeWhere((key, _) => !activeCategoryIds.contains(key));
 
     final oldIndex = _tabController.index;
     _tabController.removeListener(_handleTabChange);
@@ -288,11 +291,6 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
       return ids[_currentTabIndex - 1];
     }
     return null;
-  }
-
-  /// 获取指定 categoryId 的 GlobalKey
-  GlobalKey<_TopicListState> _getListKey(int? categoryId) {
-    return _listKeys.putIfAbsent(categoryId, () => GlobalKey<_TopicListState>());
   }
 
   /// 构建排序栏右侧的按钮
@@ -598,7 +596,7 @@ class _TopicsPageState extends ConsumerState<TopicsPage> with TickerProviderStat
     return Padding(
       padding: const EdgeInsets.only(left: 12, right: 12),
       child: _TopicList(
-        key: _getListKey(categoryId),
+        key: ValueKey(categoryId),
         categoryId: categoryId,
         onLoginRequired: _goToLogin,
       ),
@@ -860,12 +858,13 @@ class _TopicListState extends ConsumerState<_TopicList>
     with AutomaticKeepAliveClientMixin {
   final _refreshIndicatorKey = GlobalKey<RefreshIndicatorState>();
   bool _isLoadingNewTopics = false;
-  bool _keepAlive = true;
   /// 需要高亮的话题 IDs（loadBefore 插入后设置，渐变消失后清除）
   final Set<int> _highlightedTopicIds = {};
+  /// 本地缓存的话题数据，非当前 tab 时使用此缓存渲染，不订阅 provider
+  AsyncValue<List<Topic>>? _cachedTopicsAsync;
 
   @override
-  bool get wantKeepAlive => _keepAlive;
+  bool get wantKeepAlive => true;
 
   /// 列表区域顶部圆角
   static const _topBorderRadius = BorderRadius.only(
@@ -916,40 +915,38 @@ class _TopicListState extends ConsumerState<_TopicList>
   Widget build(BuildContext context) {
     super.build(context); // AutomaticKeepAliveClientMixin 需要
 
-    // 监听 FAB 刷新信号，仅当前 tab 响应
-    ref.listen(fabRefreshSignalProvider, (_, __) {
-      final currentCategoryId = ref.read(currentTabCategoryIdProvider);
-      if (widget.categoryId == currentCategoryId) {
+    final providerKey = widget.categoryId;
+    final isCurrentTab = ref.watch(currentTabCategoryIdProvider) == widget.categoryId;
+
+    // 当前 tab：watch provider 建立订阅，并缓存到本地
+    // 非当前 tab：stale 显示 loading，否则显示缓存数据；均不订阅 provider
+    final AsyncValue<List<Topic>> topicsAsync;
+    if (isCurrentTab) {
+      topicsAsync = ref.watch(topicListProvider(providerKey));
+      _cachedTopicsAsync = topicsAsync;
+
+      // 以下 listener 仅当前 tab 需要
+      ref.listen(fabRefreshSignalProvider, (_, __) {
         _refreshIndicatorKey.currentState?.show();
-      }
-    });
-
-    // 监听当前 tab 的标签过滤变化，refresh 当前 tab provider
-    ref.listen(tabTagsProvider(widget.categoryId), (prev, next) {
-      if (prev != next) {
-        ref.read(topicListProvider(widget.categoryId).notifier).refresh();
+      });
+      ref.listen(tabTagsProvider(widget.categoryId), (prev, next) {
+        if (prev != next) {
+          ref.read(topicListProvider(widget.categoryId).notifier).refresh();
+          _clearIncomingState();
+        }
+      });
+      ref.listen(topicListGlobalParamsSignal, (_, __) {
         _clearIncomingState();
-      }
-    });
-
-    // 监听 refreshAll 的失活信号，非当前 tab 释放 keepAlive
-    ref.listen(topicTabDeactivateSignal, (_, __) {
-      final currentCategoryId = ref.read(currentTabCategoryIdProvider);
-      if (widget.categoryId != currentCategoryId) {
-        _keepAlive = false;
-        updateKeepAlive();
-      }
-    });
+      });
+    } else {
+      // stale 时直接显示 loading，滑动动画中就能看到骨架屏
+      final isStale = ref.watch(staleTabsProvider).contains(widget.categoryId);
+      topicsAsync = isStale
+          ? const AsyncValue.loading()
+          : (_cachedTopicsAsync ?? const AsyncValue.loading());
+    }
 
     final selectedTopicId = ref.watch(selectedTopicProvider).topicId;
-    final providerKey = widget.categoryId;
-
-    // 全局筛选/排序变化时清除高亮和 incoming 状态
-    ref.listen(topicListGlobalParamsSignal, (_, __) {
-      _clearIncomingState();
-    });
-
-    final topicsAsync = ref.watch(topicListProvider(providerKey));
 
     return topicsAsync.when(
       data: (topics) {

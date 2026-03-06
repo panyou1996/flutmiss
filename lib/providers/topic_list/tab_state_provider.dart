@@ -11,9 +11,10 @@ final tabTagsProvider = StateProvider.family<List<String>, int?>((ref, categoryI
 /// 当前选中 tab 对应的分类 ID（null 表示"全部"tab）
 final currentTabCategoryIdProvider = StateProvider<int?>((ref) => null);
 
-/// 话题列表 tab 失活信号
-/// refreshAll 时递增，通知非当前 tab 释放 keepAlive
-final topicTabDeactivateSignal = StateProvider<int>((ref) => 0);
+/// 需要惰性刷新的 tab 集合（categoryId）
+/// 非当前 tab 被标记为 stale 后不会立即请求，
+/// 切换到该 tab 时才触发 refresh
+final staleTabsProvider = StateProvider<Set<int?>>((ref) => {});
 
 /// 话题列表全局参数变化信号
 /// watch 了所有影响话题列表的全局参数，任一变化都会触发 rebuild
