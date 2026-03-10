@@ -54,9 +54,9 @@ class _PreheatGateState extends State<PreheatGate> {
     return FutureBuilder<bool>(
       future: _loadFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.done) {
-           PreloadedDataService().setNavigatorContext(context);
-        }
+        // 无论加载状态如何，都设置 context
+        // 避免 CF 验证等待 context 而 context 等待加载完成导致的死锁
+        PreloadedDataService().setNavigatorContext(context);
 
         Widget currentWidget;
         if (snapshot.connectionState != ConnectionState.done) {
