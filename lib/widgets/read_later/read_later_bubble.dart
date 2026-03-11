@@ -108,7 +108,8 @@ class _ReadLaterBubbleState extends ConsumerState<ReadLaterBubble>
                   ),
                 ),
                 Positioned(
-                  right: -2,
+                  left: floatingIsRight ? -2 : null,
+                  right: floatingIsRight ? null : -2,
                   top: -2,
                   child: Container(
                     padding: const EdgeInsets.all(4),
