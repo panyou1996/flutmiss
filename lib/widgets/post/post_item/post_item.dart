@@ -10,6 +10,7 @@ import '../small_action_item.dart';
 import 'quote_selection_helper.dart';
 import 'widgets/post_footer_section/post_footer_section.dart';
 import 'widgets/post_header_section.dart';
+import 'widgets/post_notice_widget.dart';
 import 'widgets/post_segment_frame.dart';
 
 class PostItem extends ConsumerStatefulWidget {
@@ -112,6 +113,16 @@ class _PostItemState extends ConsumerState<PostItem> {
               ),
             ),
             const SizedBox(height: 12),
+            if (post.notice != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: SelectionContainer.disabled(
+                  child: PostNoticeWidget(
+                    notice: post.notice!,
+                    username: post.username,
+                  ),
+                ),
+              ),
             Container(
               decoration: isModeratorAction
                   ? BoxDecoration(

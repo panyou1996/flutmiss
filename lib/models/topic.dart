@@ -465,6 +465,23 @@ class ReactionUsersGroup {
 }
 
 /// 帖子（回复）数据模型
+/// 帖子提示信息（新用户首发帖、回归用户、自定义通知）
+class PostNotice {
+  final String type; // "new_user" | "returning_user" | "custom"
+  final String? lastPostedAt; // returning_user 类型的上次发帖时间
+  final String? cooked; // custom 类型的 HTML 内容
+
+  const PostNotice({required this.type, this.lastPostedAt, this.cooked});
+
+  factory PostNotice.fromJson(Map<String, dynamic> json) {
+    return PostNotice(
+      type: json['type'] as String,
+      lastPostedAt: json['last_posted_at'] as String?,
+      cooked: json['cooked'] as String?,
+    );
+  }
+}
+
 class Post {
   final int id;
   final String? name;
@@ -544,6 +561,9 @@ class Post {
   final bool cookedHidden;       // cooked 内容是否被替换为隐藏提示
   final bool canSeeHiddenPost;   // 当前用户是否可以查看隐藏内容
 
+  // 帖子提示信息
+  final PostNotice? notice;
+
   Post({
     required this.id,
     this.name,
@@ -600,6 +620,7 @@ class Post {
     this.hidden = false,
     this.cookedHidden = false,
     this.canSeeHiddenPost = false,
+    this.notice,
   });
 
   factory Post.fromJson(Map<String, dynamic> json) {
@@ -683,6 +704,9 @@ class Post {
       hidden: json['hidden'] as bool? ?? false,
       cookedHidden: json['cooked_hidden'] as bool? ?? false,
       canSeeHiddenPost: json['can_see_hidden_post'] as bool? ?? false,
+      notice: json['notice'] != null
+          ? PostNotice.fromJson(json['notice'] as Map<String, dynamic>)
+          : null,
     );
   }
 
@@ -786,6 +810,7 @@ class Post {
     bool? hidden,
     bool? cookedHidden,
     bool? canSeeHiddenPost,
+    PostNotice? notice,
     bool clearCurrentUserReaction = false,
   }) {
     return Post(
@@ -844,6 +869,7 @@ class Post {
       hidden: hidden ?? this.hidden,
       cookedHidden: cookedHidden ?? this.cookedHidden,
       canSeeHiddenPost: canSeeHiddenPost ?? this.canSeeHiddenPost,
+      notice: notice ?? this.notice,
     );
   }
 }
