@@ -88,10 +88,12 @@ class MarkdownBody extends StatelessWidget {
       final width = match.group(2)!;
       final height = match.group(3)!;
       var src = match.group(4) ?? '';
-      
-      // 处理相对路径
-      src = UrlHelper.resolveUrl(src);
-      
+
+      // upload:// 短链接保留原始值，由下游 widget factory 异步解析
+      if (!src.startsWith('upload://')) {
+        src = UrlHelper.resolveUrl(src);
+      }
+
       return '\n\n<img src="$src" alt="$alt" width="$width" height="$height">\n\n';
     });
     // 清理多余空行（连续 3 个以上换行合并为 2 个）
@@ -184,8 +186,11 @@ class MarkdownBody extends StatelessWidget {
     
     for (final entry in gridBlocks.entries) {
       final placeholder = entry.key;
-      final markdownContent = entry.value;
-      
+      var markdownContent = entry.value;
+
+      // 预处理 Discourse 图片格式（grid 内也可能包含 ![alt|WxH](url)）
+      markdownContent = _processDiscourseImages(markdownContent);
+
       // 将 grid 内的 markdown 图片转成 HTML
       var gridHtml = md.markdownToHtml(
         markdownContent,

@@ -66,7 +66,8 @@ class MarkdownToolbar extends StatefulWidget {
 
 class MarkdownToolbarState extends State<MarkdownToolbar> {
   final _picker = ImagePicker();
-  bool _isUploading = false;
+  int _uploadingCount = 0;
+  bool get _isUploading => _uploadingCount > 0;
 
   @override
   void initState() {
@@ -681,38 +682,92 @@ class MarkdownToolbarState extends State<MarkdownToolbar> {
       );
       if (result == null) return; // 用户取消
 
-      setState(() => _isUploading = true);
+      setState(() => _uploadingCount++);
 
-      final service = DiscourseService();
-      final uploadResult = await service.uploadImage(result.path);
+      try {
+        final service = DiscourseService();
+        final uploadResult = await service.uploadImage(result.path);
 
-      if (!mounted) return;
-      // 使用 Discourse 格式：![alt|widthxheight](url)
-      // 图片独占一行：光标前不是换行符或文本开头时，先补一个换行
-      final selection = widget.controller.selection;
-      final text = widget.controller.text;
-      final needsLeadingNewline = selection.isValid &&
-          selection.start > 0 &&
-          text[selection.start - 1] != '\n';
-      final prefix = needsLeadingNewline ? '\n' : '';
-      insertText('$prefix${uploadResult.toMarkdown(alt: result.originalName)}\n');
+        if (!mounted) return;
+        // 使用 Discourse 格式：![alt|widthxheight](url)
+        // 图片独占一行：光标前不是换行符或文本开头时，先补一个换行
+        final selection = widget.controller.selection;
+        final text = widget.controller.text;
+        final needsLeadingNewline = selection.isValid &&
+            selection.start > 0 &&
+            text[selection.start - 1] != '\n';
+        final prefix = needsLeadingNewline ? '\n' : '';
+        insertText('$prefix${uploadResult.toMarkdown(alt: result.originalName)}\n');
+      } finally {
+        if (mounted) {
+          setState(() => _uploadingCount--);
+        }
+      }
     } on DioException catch (_) {
       // 网络错误已由 ErrorInterceptor 处理
     } catch (e, s) {
       AppErrorHandler.handleUnexpected(e, s);
-    } finally {
-      if (mounted) {
-        setState(() => _isUploading = false);
-      }
     }
   }
 
-  Future<void> _pickAndUploadImage() async {
+  Future<void> _pickAndUploadImages() async {
     try {
-      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-      if (image == null) return;
+      final List<XFile> images = await _picker.pickMultiImage();
+      if (images.isEmpty) return;
 
-      await uploadImageFromPath(imagePath: image.path, imageName: image.name);
+      // 只选了一张，走单图流程
+      if (images.length == 1) {
+        await uploadImageFromPath(
+          imagePath: images.first.path,
+          imageName: images.first.name,
+        );
+        return;
+      }
+
+      // 多张图片，走多图确认弹框
+      if (!mounted) return;
+      final results = await showMultiImageUploadDialog(
+        context,
+        imagePaths: images.map((e) => e.path).toList(),
+        imageNames: images.map((e) => e.name).toList(),
+      );
+      if (results == null || results.isEmpty) return;
+
+      final count = results.length;
+      setState(() => _uploadingCount += count);
+
+      try {
+        final service = DiscourseService();
+
+        // 并行上传所有图片
+        final futures = results.map((result) async {
+          final uploadResult = await service.uploadImage(result.path);
+          return uploadResult.toMarkdown(alt: result.originalName);
+        }).toList();
+
+        final markdowns = await Future.wait(futures);
+
+        if (!mounted) return;
+
+        // 插入 markdown
+        final selection = widget.controller.selection;
+        final text = widget.controller.text;
+        final needsLeadingNewline = selection.isValid &&
+            selection.start > 0 &&
+            text[selection.start - 1] != '\n';
+        final prefix = needsLeadingNewline ? '\n' : '';
+
+        if (markdowns.length >= 3) {
+          // ≥3 张自动包裹 [grid]
+          insertText('$prefix[grid]\n${markdowns.join('\n')}\n[/grid]\n');
+        } else {
+          insertText('$prefix${markdowns.join('\n')}\n');
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _uploadingCount -= count);
+        }
+      }
     } on DioException catch (_) {
       // 网络错误已由 ErrorInterceptor 处理
     } catch (e, s) {
@@ -771,7 +826,7 @@ class MarkdownToolbarState extends State<MarkdownToolbar> {
                       children: [
                         _ToolbarButton(
                           icon: FontAwesomeIcons.image,
-                          onPressed: _isUploading ? null : _pickAndUploadImage,
+                          onPressed: _isUploading ? null : _pickAndUploadImages,
                           isLoading: _isUploading,
                         ),
                         // 标题按钮（带弹出菜单）

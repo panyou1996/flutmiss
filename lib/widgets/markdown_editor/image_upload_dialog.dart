@@ -341,3 +341,369 @@ Future<ImageUploadResult?> showImageUploadDialog(
     ),
   );
 }
+
+/// 多图上传确认弹框中的单张图片信息
+class _MultiImageItem {
+  final String path;
+  final String name;
+  final ImageCompressionStrategy strategy;
+  int? size;
+
+  _MultiImageItem({
+    required this.path,
+    required this.name,
+    required this.strategy,
+  });
+}
+
+/// 多图上传确认弹框
+class MultiImageUploadDialog extends StatefulWidget {
+  final List<String> imagePaths;
+  final List<String> imageNames;
+
+  const MultiImageUploadDialog({
+    super.key,
+    required this.imagePaths,
+    required this.imageNames,
+  });
+
+  @override
+  State<MultiImageUploadDialog> createState() => _MultiImageUploadDialogState();
+}
+
+class _MultiImageUploadDialogState extends State<MultiImageUploadDialog> {
+  static const _qualityPreferenceKey = 'markdown_editor.image_upload_quality';
+
+  final List<_MultiImageItem> _items = [];
+  int _quality = 85;
+  bool _isProcessing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    for (int i = 0; i < widget.imagePaths.length; i++) {
+      final path = widget.imagePaths[i];
+      _items.add(_MultiImageItem(
+        path: path,
+        name: widget.imageNames[i],
+        strategy: ImageCompressionStrategyFactory.fromPath(path),
+      ));
+    }
+    _restoreQualityPreference();
+  }
+
+  Future<void> _restoreQualityPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedQuality = prefs.getInt(_qualityPreferenceKey);
+    if (!mounted) return;
+    if (savedQuality != null) {
+      setState(() {
+        _quality = savedQuality.clamp(10, 100).toInt();
+      });
+    }
+    await _loadAllSizes();
+  }
+
+  Future<void> _loadAllSizes() async {
+    for (final item in _items) {
+      final file = File(item.path);
+      if (await file.exists()) {
+        item.size = await file.length();
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _saveQualityPreference(int quality) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_qualityPreferenceKey, quality);
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+  }
+
+  int get _totalOriginalSize {
+    int total = 0;
+    for (final item in _items) {
+      if (item.size != null) total += item.size!;
+    }
+    return total;
+  }
+
+  int get _totalEstimatedSize {
+    int total = 0;
+    for (final item in _items) {
+      if (item.size != null) {
+        total += item.strategy.estimateCompressedSize(item.size!, _quality);
+      }
+    }
+    return total;
+  }
+
+  void _removeItem(int index) {
+    if (_items.length <= 1) {
+      ToastService.showInfo('至少需要保留一张图片');
+      return;
+    }
+    setState(() => _items.removeAt(index));
+  }
+
+  Future<void> _submit() async {
+    setState(() => _isProcessing = true);
+
+    try {
+      await _saveQualityPreference(_quality);
+
+      final results = <ImageUploadResult>[];
+      for (final item in _items) {
+        final compressedPath = await item.strategy.compress(item.path, _quality);
+        results.add(ImageUploadResult(
+          path: compressedPath,
+          originalName: item.name,
+        ));
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pop(results);
+    } catch (e) {
+      if (!mounted) return;
+      ToastService.showError('处理图片失败: $e');
+      setState(() => _isProcessing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return AlertDialog(
+      title: Text('上传 ${_items.length} 张图片'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 缩略图网格
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                ),
+                itemCount: _items.length,
+                itemBuilder: (context, index) {
+                  final item = _items[index];
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: Image.file(
+                          File(item.path),
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Center(
+                              child: Icon(
+                                Icons.broken_image_outlined,
+                                size: 24,
+                                color: theme.colorScheme.outline,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      // 删除按钮
+                      Positioned(
+                        top: 2,
+                        right: 2,
+                        child: GestureDetector(
+                          onTap: _isProcessing ? null : () => _removeItem(index),
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.close,
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                      // 文件大小标签
+                      if (item.size != null)
+                        Positioned(
+                          bottom: 2,
+                          left: 2,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              _formatFileSize(item.size!),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+
+              // 压缩质量滑块
+              Row(
+                children: [
+                  Text('压缩质量：', style: theme.textTheme.bodyMedium),
+                  Expanded(
+                    child: Slider(
+                      value: _quality.toDouble(),
+                      min: 10,
+                      max: 100,
+                      divisions: 18,
+                      label: '$_quality%',
+                      onChangeEnd: _isProcessing
+                          ? null
+                          : (value) => _saveQualityPreference(value.round()),
+                      onChanged: _isProcessing
+                          ? null
+                          : (value) {
+                              setState(() {
+                                _quality = value.round();
+                              });
+                            },
+                    ),
+                  ),
+                  SizedBox(
+                    width: 48,
+                    child: Text(
+                      '$_quality%',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              // 总大小信息
+              if (_totalOriginalSize > 0)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.photo_size_select_large,
+                        size: 16,
+                        color: theme.colorScheme.outline,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '总大小：${_formatFileSize(_totalOriginalSize)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                      if (_quality < 100) ...[
+                        const SizedBox(width: 8),
+                        Icon(
+                          Icons.arrow_forward,
+                          size: 14,
+                          color: theme.colorScheme.outline,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '约 ${_formatFileSize(_totalEstimatedSize)}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+              // ≥3 张自动 grid 提示
+              if (_items.length >= 3)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.grid_view_rounded,
+                        size: 16,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '上传后将自动使用 [grid] 网格布局',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isProcessing ? null : () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: _isProcessing ? null : _submit,
+          child: _isProcessing
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text('上传 ${_items.length} 张'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 显示多图上传确认弹框
+Future<List<ImageUploadResult>?> showMultiImageUploadDialog(
+  BuildContext context, {
+  required List<String> imagePaths,
+  required List<String> imageNames,
+}) {
+  return showDialog<List<ImageUploadResult>>(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => MultiImageUploadDialog(
+      imagePaths: imagePaths,
+      imageNames: imageNames,
+    ),
+  );
+}
