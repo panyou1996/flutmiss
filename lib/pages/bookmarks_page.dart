@@ -120,90 +120,97 @@ class _BookmarksPageState extends ConsumerState<BookmarksPage> {
     );
   }
 
-  /// 是否有书签底部附属信息
-  bool _hasBookmarkBottom(Topic topic) {
-    return (topic.bookmarkName != null && topic.bookmarkName!.isNotEmpty) ||
-        topic.bookmarkReminderAt != null ||
-        (topic.excerpt != null && topic.excerpt!.isNotEmpty);
-  }
-
-  /// 卡片底部：书签元信息 + 摘要
-  Widget _buildBookmarkBottom(BuildContext context, Topic topic) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isExpired = topic.bookmarkReminderAt != null &&
-        topic.bookmarkReminderAt!.isBefore(DateTime.now());
+  /// 卡片顶部色带：书签名称、提醒时间
+  Widget? _buildBookmarkTopBar(BuildContext context, Topic topic) {
     final hasName = topic.bookmarkName != null && topic.bookmarkName!.isNotEmpty;
     final hasReminder = topic.bookmarkReminderAt != null;
-    final hasExcerpt = topic.excerpt != null && topic.excerpt!.isNotEmpty;
-    final hasMeta = hasName || hasReminder;
+    if (!hasName && !hasReminder) return null;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 元信息行：书签名称、提醒时间
-        if (hasMeta)
-          Text.rich(
-            TextSpan(
-              children: [
-                // 书签名称
-                if (hasName) ...[
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.middle,
-                    child: Icon(Icons.bookmark_outlined, size: 12,
-                        color: colorScheme.onSurfaceVariant),
-                  ),
-                  TextSpan(text: ' ${topic.bookmarkName!}'),
-                ],
-                // 提醒时间
-                if (hasReminder) ...[
-                  if (hasName)
-                    TextSpan(
-                      text: ' · ',
-                      style: TextStyle(
-                          color: colorScheme.onSurfaceVariant
-                              .withValues(alpha: 0.4)),
-                    ),
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.middle,
-                    child: Icon(Icons.alarm, size: 12,
-                        color: isExpired
-                            ? colorScheme.error
-                            : colorScheme.onSurfaceVariant),
-                  ),
-                  TextSpan(
-                    text: isExpired
-                        ? ' 已过期'
-                        : ' ${TimeUtils.formatDetailTime(topic.bookmarkReminderAt!)}',
-                    style: isExpired
-                        ? TextStyle(color: colorScheme.error)
-                        : null,
-                  ),
-                ],
-              ],
-            ),
-            style: TextStyle(
-              fontSize: 12,
-              color: colorScheme.onSurfaceVariant,
-              height: 1.4,
-            ),
-          ),
-        // 摘要
-        if (hasExcerpt)
-          Padding(
-            padding: EdgeInsets.only(top: hasMeta ? 4 : 0),
-            child: Text(
-              topic.excerpt!,
-              style: TextStyle(
-                fontSize: 12,
-                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                height: 1.4,
+    final colorScheme = Theme.of(context).colorScheme;
+    final isExpired = hasReminder &&
+        topic.bookmarkReminderAt!.isBefore(DateTime.now());
+    final bgColor = isExpired
+        ? colorScheme.errorContainer.withValues(alpha: 0.5)
+        : colorScheme.secondaryContainer.withValues(alpha: 0.6);
+    final fgColor = isExpired
+        ? colorScheme.error
+        : colorScheme.onSecondaryContainer;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      color: bgColor,
+      child: Text.rich(
+        TextSpan(
+          children: [
+            // 书签名称
+            if (hasName) ...[
+              WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: Icon(Icons.bookmark_outlined, size: 13, color: fgColor),
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-      ],
+              TextSpan(text: ' ${topic.bookmarkName!}'),
+            ],
+            // 提醒时间
+            if (hasReminder) ...[
+              if (hasName)
+                TextSpan(
+                  text: '  ·  ',
+                  style: TextStyle(color: fgColor.withValues(alpha: 0.4)),
+                ),
+              WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: Icon(Icons.alarm, size: 13, color: fgColor),
+              ),
+              TextSpan(
+                text: isExpired
+                    ? ' 已过期'
+                    : ' ${TimeUtils.formatDetailTime(topic.bookmarkReminderAt!)}',
+              ),
+            ],
+          ],
+        ),
+        style: TextStyle(
+          fontSize: 12,
+          color: fgColor,
+          height: 1.3,
+        ),
+      ),
     );
+  }
+
+  /// 卡片底部：摘要
+  Widget? _buildBookmarkExcerpt(BuildContext context, Topic topic) {
+    if (topic.excerpt == null) return null;
+    final cleaned = _cleanExcerpt(topic.excerpt!);
+    if (cleaned.isEmpty) return null;
+
+    final colorScheme = Theme.of(context).colorScheme;
+    return Text(
+      cleaned,
+      style: TextStyle(
+        fontSize: 12,
+        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+        height: 1.4,
+      ),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  /// 清理 excerpt 中的 HTML 标签和实体
+  String _cleanExcerpt(String html) {
+    return html
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll('&hellip;', '...')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 
   List<PreviewAction> _buildPreviewActions(Topic topic) {
@@ -367,9 +374,8 @@ class _BookmarksPageState extends ConsumerState<BookmarksPage> {
                 isSelected: false,
                 onTap: () => _onItemTap(topic),
                 enableLongPress: enableLongPress,
-                bottomWidget: _hasBookmarkBottom(topic)
-                    ? _buildBookmarkBottom(context, topic)
-                    : null,
+                topWidget: _buildBookmarkTopBar(context, topic),
+                bottomWidget: _buildBookmarkExcerpt(context, topic),
                 previewActions: topic.bookmarkId != null
                     ? _buildPreviewActions(topic)
                     : null,

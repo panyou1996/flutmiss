@@ -20,6 +20,7 @@ class TopicCard extends ConsumerWidget {
   final VoidCallback? onLongPress;
   final bool isSelected;
   final Color? highlightColor;
+  final Widget? topWidget;
   final Widget? bottomWidget;
 
   const TopicCard({
@@ -29,6 +30,7 @@ class TopicCard extends ConsumerWidget {
     this.onLongPress,
     this.isSelected = false,
     this.highlightColor,
+    this.topWidget,
     this.bottomWidget,
   });
 
@@ -76,6 +78,8 @@ class TopicCard extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // 顶部附属区域（如书签元信息色带）
+            if (topWidget != null) topWidget!,
             Opacity(
               opacity: isFullyRead ? 0.5 : 1.0,
               child: Padding(
