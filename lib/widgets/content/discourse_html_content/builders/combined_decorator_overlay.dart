@@ -42,6 +42,9 @@ class _CombinedDecoratorOverlayState extends State<CombinedDecoratorOverlay>
   bool _needsRescan = false;
   int _scanDelayCounter = 0;
 
+  // 上次扫描时 RenderObject 的尺寸，用于检测布局变化（如 details 展开/收起）
+  Size? _lastRenderSize;
+
   @override
   void initState() {
     super.initState();
@@ -85,6 +88,18 @@ class _CombinedDecoratorOverlayState extends State<CombinedDecoratorOverlay>
       return;
     }
 
+    // 检测 RenderObject 尺寸变化（如 details 展开/收起导致整体高度变化）
+    // 尺寸变化说明上一帧布局已完成，可以立即 rescan，避免延迟帧导致闪烁
+    final ro = context.findRenderObject();
+    if (ro is RenderBox && ro.hasSize) {
+      final currentSize = ro.size;
+      if (_lastRenderSize != null && currentSize != _lastRenderSize) {
+        _scan();
+        setState(() {});
+        return;
+      }
+    }
+
     if (dtMs > 0 && dtMs < 100) {
       for (final group in _spoilerGroups) {
         if (!group.isRevealed) {
@@ -123,6 +138,11 @@ class _CombinedDecoratorOverlayState extends State<CombinedDecoratorOverlay>
     final renderObject = context.findRenderObject();
     if (renderObject == null) return;
 
+    // 保存当前 RenderObject 尺寸
+    if (renderObject is RenderBox && renderObject.hasSize) {
+      _lastRenderSize = renderObject.size;
+    }
+
     final newCodeGroups = <List<Rect>>[];
     final spoilerTempRects = <_TempRect>[];
     int paragraphIndex = 0;
@@ -155,16 +175,37 @@ class _CombinedDecoratorOverlayState extends State<CombinedDecoratorOverlay>
     // 处理 code groups
     _codeGroups = newCodeGroups;
 
-    // 处理 spoiler groups
+    // 处理 spoiler groups，复用已有粒子系统避免闪烁
+    final oldGroupMap = <String, SpoilerGroup>{};
+    for (final group in _spoilerGroups) {
+      oldGroupMap[group.id] = group;
+    }
+
     final newSpoilerGroups = _buildSpoilerGroups(spoilerTempRects);
+    final resultGroups = <SpoilerGroup>[];
     for (final group in newSpoilerGroups) {
-      if (widget.revealedSpoilers.contains(group.id)) {
-        group.isRevealed = true;
+      final newRects = group.rects.map((r) => r.rect).toList();
+      final oldGroup = oldGroupMap[group.id];
+      if (oldGroup != null && !oldGroup.isRevealed) {
+        // 复用旧 group，更新其区域位置，保留粒子系统
+        oldGroup.rects
+          ..clear()
+          ..addAll(group.rects);
+        oldGroup.particleSystem.updateRects(newRects);
+        if (widget.revealedSpoilers.contains(group.id)) {
+          oldGroup.isRevealed = true;
+        }
+        resultGroups.add(oldGroup);
       } else {
-        group.particleSystem.initForRects(group.rects.map((r) => r.rect).toList());
+        if (widget.revealedSpoilers.contains(group.id)) {
+          group.isRevealed = true;
+        } else {
+          group.particleSystem.initForRects(newRects);
+        }
+        resultGroups.add(group);
       }
     }
-    _spoilerGroups = newSpoilerGroups;
+    _spoilerGroups = resultGroups;
   }
 
   void _extractFromParagraph(
@@ -297,7 +338,9 @@ class _CombinedDecoratorOverlayState extends State<CombinedDecoratorOverlay>
             spoilerRects,
           );
           charIndex = result.$1;
-          if (result.$2 != null) {
+          if (result.$2 != null && inSpoiler) {
+            // 只在当前 span 本身是 spoiler 上下文时，才把子节点的 spoilerId 传给后续兄弟
+            // 这样同一 spoiler 元素内的子节点共享 ID，但不同 spoiler 元素各自独立
             childSpoilerId = result.$2;
             spoilerId ??= result.$2;
           }

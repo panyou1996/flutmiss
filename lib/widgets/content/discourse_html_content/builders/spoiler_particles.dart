@@ -48,6 +48,54 @@ class SpoilerParticleSystem {
     }
   }
 
+  /// 更新区域位置，复用已有粒子（避免布局变化时粒子闪烁重建）
+  void updateRects(List<Rect> newRects) {
+    if (newRects.isEmpty) {
+      clear();
+      return;
+    }
+
+    final oldRects = _rects;
+    _rects = newRects;
+
+    // 计算新的最大粒子数
+    double totalArea = 0;
+    for (final rect in newRects) {
+      totalArea += rect.width * rect.height;
+    }
+    _maxParticles = (totalArea / 4).clamp(200, 2000).toInt();
+
+    // 建立旧区域索引到新区域的映射（按顺序一一对应）
+    // 并将已有粒子的 boundingRect 迁移到新区域
+    for (final p in particles) {
+      final oldIdx = oldRects.indexOf(p.boundingRect!);
+      if (oldIdx >= 0 && oldIdx < newRects.length) {
+        // 计算粒子在旧区域中的相对位置，映射到新区域
+        final oldRect = oldRects[oldIdx];
+        final newRect = newRects[oldIdx];
+        final relX = (p.x - oldRect.left) / oldRect.width;
+        final relY = (p.y - oldRect.top) / oldRect.height;
+        p.x = newRect.left + relX * newRect.width;
+        p.y = newRect.top + relY * newRect.height;
+        p.boundingRect = newRect;
+      } else {
+        // 旧区域不存在于新布局中，标记粒子为已死亡
+        p.life = 0;
+      }
+    }
+
+    // 移除已死亡的粒子
+    particles.removeWhere((p) => p.life <= 0);
+
+    // 补充或裁减粒子数
+    while (particles.length < _maxParticles) {
+      _spawnParticle();
+    }
+    if (particles.length > _maxParticles) {
+      particles.removeRange(_maxParticles, particles.length);
+    }
+  }
+
   /// 根据尺寸初始化粒子（用于块级 spoiler）
   void initForSize(Size size) {
     initForRects([Rect.fromLTWH(0, 0, size.width, size.height)]);
