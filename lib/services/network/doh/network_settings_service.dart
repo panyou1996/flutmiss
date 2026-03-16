@@ -51,6 +51,7 @@ class DohServer {
     required this.url,
     this.bootstrapIps = const [],
     this.isCustom = false,
+    this.serverIp,
   });
 
   final String name;
@@ -59,11 +60,14 @@ class DohServer {
   /// Chrome 也是这样做的：预置 DOH 服务器的 IP，直接用 IP 连接
   final List<String> bootstrapIps;
   final bool isCustom;
+  /// 可选的服务端 IP 地址，指定后跳过 DNS 解析直接连接
+  final String? serverIp;
 
   Map<String, dynamic> toJson() => {
         'name': name,
         'url': url,
         if (bootstrapIps.isNotEmpty) 'bootstrapIps': bootstrapIps,
+        if (serverIp != null && serverIp!.isNotEmpty) 'serverIp': serverIp,
       };
 
   static DohServer fromJson(Map<String, dynamic> json) {
@@ -73,6 +77,7 @@ class DohServer {
       url: json['url']?.toString() ?? '',
       bootstrapIps: ips is List ? ips.cast<String>() : const [],
       isCustom: true,
+      serverIp: json['serverIp']?.toString(),
     );
   }
 }
@@ -300,11 +305,13 @@ class NetworkSettingsService {
 
       // 启动 Rust 代理（内部处理 DOH + ECH + 上游代理）
       // DOH + Shadowsocks 共存时，DOH 查询走直连，实际连接走 SS
+      final selectedServer = _findServer(current.selectedServerUrl);
       final success = await _rustProxyService.start(
         preferredPort: current.proxyPort ?? 0,
         enableDoh: current.dohEnabled,
         preferIPv6: current.preferIPv6,
         dohServer: current.dohEnabled ? current.selectedServerUrl : null,
+        serverIp: selectedServer?.serverIp,
         upstreamProtocol: upstream.isValid ? upstream.protocol.storageValue : null,
         upstreamHost: upstream.isValid ? upstream.host : null,
         upstreamPort: upstream.isValid ? upstream.port : null,

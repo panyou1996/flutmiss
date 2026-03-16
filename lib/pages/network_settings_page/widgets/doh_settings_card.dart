@@ -347,8 +347,10 @@ class _DohSettingsCardState extends State<DohSettingsCard> {
         ],
       ),
       subtitle: Text(
-        server.url,
-        maxLines: 1,
+        server.serverIp != null && server.serverIp!.isNotEmpty
+            ? '${server.url}\nIP: ${server.serverIp}'
+            : server.url,
+        maxLines: 2,
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
@@ -459,7 +461,11 @@ class _DohSettingsCardState extends State<DohSettingsCard> {
 
     setState(() => _testingServers.add(server.url));
 
-    final resolver = DohResolver(serverUrl: server.url, enableFallback: false);
+    final resolver = DohResolver(
+      serverUrl: server.url,
+      bootstrapIps: server.bootstrapIps,
+      enableFallback: false,
+    );
     try {
       final ms = await resolver.testLatency(_service.testHost);
       if (mounted) {
@@ -494,6 +500,7 @@ class _DohSettingsCardState extends State<DohSettingsCard> {
   Future<void> _showAddServerDialog() async {
     final nameController = TextEditingController();
     final urlController = TextEditingController();
+    final serverIpController = TextEditingController();
 
     final result = await showDialog<DohServer>(
       context: context,
@@ -519,6 +526,16 @@ class _DohSettingsCardState extends State<DohSettingsCard> {
                   hintText: 'https://dns.example.com/dns-query',
                 ),
                 keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.next,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: serverIpController,
+                decoration: const InputDecoration(
+                  labelText: '服务端 IP（可选）',
+                  hintText: '直接使用指定 IP 连接，跳过 DNS 解析',
+                ),
+                keyboardType: TextInputType.text,
               ),
             ],
           ),
@@ -531,6 +548,7 @@ class _DohSettingsCardState extends State<DohSettingsCard> {
               onPressed: () {
                 final name = nameController.text.trim();
                 final url = urlController.text.trim();
+                final serverIp = serverIpController.text.trim();
                 if (name.isEmpty || url.isEmpty) {
                   ToastService.showInfo('请填写完整信息');
                   return;
@@ -539,7 +557,15 @@ class _DohSettingsCardState extends State<DohSettingsCard> {
                   ToastService.showError('地址必须以 https:// 开头');
                   return;
                 }
-                Navigator.pop(context, DohServer(name: name, url: url, isCustom: true));
+                Navigator.pop(
+                  context,
+                  DohServer(
+                    name: name,
+                    url: url,
+                    isCustom: true,
+                    serverIp: serverIp.isEmpty ? null : serverIp,
+                  ),
+                );
               },
               child: const Text('添加'),
             ),
@@ -556,6 +582,7 @@ class _DohSettingsCardState extends State<DohSettingsCard> {
   Future<void> _showEditServerDialog(DohServer server) async {
     final nameController = TextEditingController(text: server.name);
     final urlController = TextEditingController(text: server.url);
+    final serverIpController = TextEditingController(text: server.serverIp ?? '');
 
     final result = await showDialog<DohServer>(
       context: context,
@@ -581,6 +608,16 @@ class _DohSettingsCardState extends State<DohSettingsCard> {
                   hintText: 'https://dns.example.com/dns-query',
                 ),
                 keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.next,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: serverIpController,
+                decoration: const InputDecoration(
+                  labelText: '服务端 IP（可选）',
+                  hintText: '直接使用指定 IP 连接，跳过 DNS 解析',
+                ),
+                keyboardType: TextInputType.text,
               ),
             ],
           ),
@@ -593,6 +630,7 @@ class _DohSettingsCardState extends State<DohSettingsCard> {
               onPressed: () {
                 final name = nameController.text.trim();
                 final url = urlController.text.trim();
+                final serverIp = serverIpController.text.trim();
                 if (name.isEmpty || url.isEmpty) {
                   ToastService.showInfo('请填写完整信息');
                   return;
@@ -601,7 +639,15 @@ class _DohSettingsCardState extends State<DohSettingsCard> {
                   ToastService.showError('地址必须以 https:// 开头');
                   return;
                 }
-                Navigator.pop(context, DohServer(name: name, url: url, isCustom: true));
+                Navigator.pop(
+                  context,
+                  DohServer(
+                    name: name,
+                    url: url,
+                    isCustom: true,
+                    serverIp: serverIp.isEmpty ? null : serverIp,
+                  ),
+                );
               },
               child: const Text('保存'),
             ),

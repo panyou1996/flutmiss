@@ -98,6 +98,7 @@ class DohProxyFfi {
     bool enableDoh = true,
     bool preferIpv6 = false,
     String? dohServer,
+    String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
     int? upstreamPort,
@@ -116,6 +117,8 @@ class DohProxyFfi {
       'doh_server': dohServer ?? 'cloudflare',
       'prefer_ipv6': preferIpv6,
       'timeout_secs': 30,
+      if (serverIp != null && serverIp.isNotEmpty)
+        'server_ip': serverIp,
       if (upstreamHost != null && upstreamHost.isNotEmpty && upstreamPort != null && upstreamPort > 0)
         'upstream_proxy': {
           'protocol': upstreamProtocol ?? 'http',

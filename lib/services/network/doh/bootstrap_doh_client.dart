@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import '../../network_logger.dart';
@@ -12,6 +13,16 @@ enum DnsRecordType {
 
   const DnsRecordType(this.value);
   final int value;
+}
+
+/// DNS 解析结果，包含地址和 TTL
+class DnsResult {
+  DnsResult({required this.addresses, required this.minTtl});
+
+  final List<InternetAddress> addresses;
+
+  /// 所有应答记录中最小的 TTL（秒）
+  final int minTtl;
 }
 
 /// 支持 Bootstrap IP 的 DOH 客户端
@@ -29,12 +40,22 @@ class BootstrapDohClient {
   final String serverUrl;
   final List<String> bootstrapIps;
   final Duration timeout;
+
   /// 是否优先使用 IPv6 连接 DOH 服务
   bool preferIPv6;
 
   late String _host;
   late int _port;
   late String _path;
+
+  final _random = Random();
+
+  /// 缓存的连接
+  SecureSocket? _cachedSocket;
+  DateTime? _socketCreatedAt;
+
+  /// 连接最大存活时间
+  static const _maxSocketAge = Duration(seconds: 30);
 
   void _parseServerUrl() {
     final uri = Uri.parse(serverUrl);
@@ -45,141 +66,289 @@ class BootstrapDohClient {
 
   /// 查询单个地址
   Future<InternetAddress?> lookup(String host) async {
-    final addresses = await lookupAll(host);
-    return addresses.isNotEmpty ? addresses.first : null;
+    final result = await lookupAllWithTtl(host);
+    return result.addresses.isNotEmpty ? result.addresses.first : null;
   }
 
   /// 查询所有地址（同时查询 A 和 AAAA 记录）
   Future<List<InternetAddress>> lookupAll(String host) async {
-    // 并行查询 A 和 AAAA 记录
-    final results = await Future.wait([
-      _lookupByType(host, DnsRecordType.a),
-      _lookupByType(host, DnsRecordType.aaaa),
-    ]);
-
-    final addresses = <InternetAddress>[
-      ...results[0], // IPv4
-      ...results[1], // IPv6
-    ];
-
-    return addresses;
+    final result = await lookupAllWithTtl(host);
+    return result.addresses;
   }
 
-  /// 按记录类型查询地址
-  Future<List<InternetAddress>> _lookupByType(String host, DnsRecordType type) async {
-    try {
-      // 构建 DNS 查询消息
-      final query = _buildDnsQuery(host, type: type);
-      final base64Query = base64Url.encode(query).replaceAll('=', '');
+  /// 查询所有地址并返回 TTL
+  Future<DnsResult> lookupAllWithTtl(String host) async {
+    // 串行查询 A 和 AAAA 记录（共享单个 socket 连接，不能并行）
+    final results = [
+      await _lookupByType(host, DnsRecordType.a),
+      await _lookupByType(host, DnsRecordType.aaaa),
+    ];
 
-      // 使用 GET 方法
-      final requestPath = '$_path?dns=$base64Query';
+    final addresses = <InternetAddress>[
+      ...results[0].addresses,
+      ...results[1].addresses,
+    ];
 
-      // 尝试连接
-      SecureSocket? socket;
-      Object? lastError;
+    // 取两个查询结果中较小的 TTL
+    final minTtl = [results[0].minTtl, results[1].minTtl]
+        .where((t) => t > 0)
+        .fold<int>(300, min); // 默认 300 秒
 
-      if (bootstrapIps.isNotEmpty) {
-        // 使用 Bootstrap IP 直接连接
-        final ipv4 = bootstrapIps.where((ip) => !ip.contains(':')).toList();
-        final ipv6 = bootstrapIps.where((ip) => ip.contains(':')).toList();
-        // 根据 preferIPv6 设置决定优先顺序
-        final sortedIps = preferIPv6 ? [...ipv6, ...ipv4] : [...ipv4, ...ipv6];
+    return DnsResult(addresses: addresses, minTtl: minTtl);
+  }
 
-        NetworkLogger.log('[DOH] 使用 Bootstrap IP 连接 $_host (IPv6优先: $preferIPv6): $sortedIps');
+  /// 获取或创建连接
+  Future<SecureSocket?> _getOrCreateSocket() async {
+    // 检查缓存的连接是否可用
+    if (_cachedSocket != null && _socketCreatedAt != null) {
+      final age = DateTime.now().difference(_socketCreatedAt!);
+      if (age < _maxSocketAge) {
+        return _cachedSocket;
+      }
+      // 连接过期，关闭
+      _closeSocket();
+    }
 
-        for (final ip in sortedIps) {
-          try {
-            final address = InternetAddress(ip);
-            // 1. 先用普通 Socket 连接 IP
-            final rawSocket = await Socket.connect(
-              address,
-              _port,
-              timeout: timeout,
-            );
-            // 2. 升级为 TLS，指定 host 参数设置 SNI 为域名
-            socket = await SecureSocket.secure(
-              rawSocket,
-              host: _host, // SNI 使用域名，确保证书验证正确
-            );
-            NetworkLogger.log('[DOH] Bootstrap IP 连接成功: $ip');
-            break;
-          } catch (e) {
-            lastError = e;
-            NetworkLogger.log('[DOH] Bootstrap IP 连接失败: $ip | $e');
-            continue;
-          }
-        }
-      } else {
-        // 没有 Bootstrap IP，使用系统 DNS 解析后连接
+    // 创建新连接
+    SecureSocket? socket;
+    Object? lastError;
+
+    if (bootstrapIps.isNotEmpty) {
+      final ipv4 = bootstrapIps.where((ip) => !ip.contains(':')).toList();
+      final ipv6 = bootstrapIps.where((ip) => ip.contains(':')).toList();
+      final sortedIps = preferIPv6 ? [...ipv6, ...ipv4] : [...ipv4, ...ipv6];
+
+      NetworkLogger.log(
+          '[DOH] 使用 Bootstrap IP 连接 $_host (IPv6优先: $preferIPv6): $sortedIps');
+
+      for (final ip in sortedIps) {
         try {
-          socket = await SecureSocket.connect(
-            _host,
+          final address = InternetAddress(ip);
+          final rawSocket = await Socket.connect(
+            address,
             _port,
             timeout: timeout,
           );
+          socket = await SecureSocket.secure(
+            rawSocket,
+            host: _host,
+          );
+          NetworkLogger.log('[DOH] Bootstrap IP 连接成功: $ip');
+          break;
         } catch (e) {
           lastError = e;
+          NetworkLogger.log('[DOH] Bootstrap IP 连接失败: $ip | $e');
+          continue;
         }
       }
-
-      if (socket == null) {
-        throw lastError ?? SocketException('无法连接到 DOH 服务');
-      }
-
+    } else {
       try {
-        // 发送 HTTP/1.1 请求
-        final request = StringBuffer()
-          ..writeln('GET $requestPath HTTP/1.1')
-          ..writeln('Host: $_host')
-          ..writeln('Accept: application/dns-message')
-          ..writeln('Connection: close')
-          ..writeln();
-
-        socket.write(request.toString());
-        await socket.flush();
-
-        // 读取响应
-        final response = await socket.fold<List<int>>(
-          <int>[],
-          (previous, element) => previous..addAll(element),
-        ).timeout(timeout);
-
-        // 解析 HTTP 响应
-        final responseStr = utf8.decode(response, allowMalformed: true);
-        final headerEnd = responseStr.indexOf('\r\n\r\n');
-        if (headerEnd == -1) {
-          throw HttpException('无效的 HTTP 响应');
-        }
-
-        final headers = responseStr.substring(0, headerEnd);
-        final statusLine = headers.split('\r\n').first;
-
-        // 检查状态码
-        if (!statusLine.contains('200')) {
-          throw HttpException('DOH 服务器返回错误: $statusLine');
-        }
-
-        // 提取 body（跳过 headers + \r\n\r\n）
-        final bodyStart = headerEnd + 4;
-        final body = Uint8List.fromList(response.sublist(bodyStart));
-
-        // 处理 chunked 编码
-        final Uint8List dnsResponse;
-        if (headers.toLowerCase().contains('transfer-encoding: chunked')) {
-          dnsResponse = _decodeChunked(body);
-        } else {
-          dnsResponse = body;
-        }
-
-        return _parseDnsResponse(dnsResponse);
-      } finally {
-        await socket.close();
+        socket = await SecureSocket.connect(
+          _host,
+          _port,
+          timeout: timeout,
+        );
+      } catch (e) {
+        lastError = e;
       }
+    }
+
+    if (socket == null) {
+      throw lastError ?? SocketException('无法连接到 DOH 服务');
+    }
+
+    _cachedSocket = socket;
+    _socketCreatedAt = DateTime.now();
+    return socket;
+  }
+
+  void _closeSocket() {
+    try {
+      _cachedSocket?.destroy();
+    } catch (_) {}
+    _cachedSocket = null;
+    _socketCreatedAt = null;
+  }
+
+  /// 按记录类型查询地址
+  Future<DnsResult> _lookupByType(String host, DnsRecordType type) async {
+    try {
+      final query = _buildDnsQuery(host, type: type);
+      final base64Query = base64Url.encode(query).replaceAll('=', '');
+      final requestPath = '$_path?dns=$base64Query';
+
+      // 尝试用缓存连接发送（keep-alive），失败则新建连接
+      for (var attempt = 0; attempt < 2; attempt++) {
+        SecureSocket? socket;
+        final isReuse = attempt == 0 && _cachedSocket != null;
+
+        try {
+          if (isReuse) {
+            socket = _cachedSocket;
+          } else {
+            _closeSocket();
+            socket = await _getOrCreateSocket();
+          }
+
+          if (socket == null) {
+            throw const SocketException('无法连接到 DOH 服务');
+          }
+
+          // 发送 HTTP/1.1 请求，使用 keep-alive
+          final request = StringBuffer()
+            ..writeln('GET $requestPath HTTP/1.1')
+            ..writeln('Host: $_host')
+            ..writeln('Accept: application/dns-message')
+            ..writeln('Connection: keep-alive')
+            ..writeln();
+
+          socket.write(request.toString());
+          await socket.flush();
+
+          // 读取响应（字节级解析）
+          final responseBytes = await _readHttpResponse(socket);
+          if (responseBytes == null) {
+            if (isReuse) {
+              // 缓存连接可能已被服务端关闭，重试
+              _closeSocket();
+              continue;
+            }
+            throw const HttpException('无效的 HTTP 响应');
+          }
+
+          return _parseDnsResponse(responseBytes);
+        } catch (e) {
+          if (isReuse) {
+            // 复用连接失败，清理后重试
+            _closeSocket();
+            continue;
+          }
+          _closeSocket();
+          rethrow;
+        }
+      }
+
+      throw const SocketException('DOH 查询失败');
     } catch (e) {
       NetworkLogger.log('[DOH] 查询失败: $host | $e');
       rethrow;
     }
+  }
+
+  /// 在字节层面读取完整的 HTTP 响应 body
+  /// 返回解码后的 DNS 响应字节，或 null 表示连接已关闭
+  Future<Uint8List?> _readHttpResponse(SecureSocket socket) async {
+    final allBytes = <int>[];
+    final completer = Completer<Uint8List?>();
+    StreamSubscription<Uint8List>? subscription;
+
+    subscription = socket.listen(
+      (data) {
+        allBytes.addAll(data);
+
+        // 在字节层面查找 \r\n\r\n (0x0D 0x0A 0x0D 0x0A)
+        final headerEndIndex = _findHeaderEnd(allBytes);
+        if (headerEndIndex == -1) return;
+
+        final headerBytes = allBytes.sublist(0, headerEndIndex);
+        final headerStr = ascii.decode(headerBytes, allowInvalid: true);
+        final bodyStart = headerEndIndex + 4;
+
+        // 检查状态码
+        final statusLine = headerStr.split('\r\n').first;
+        if (!statusLine.contains('200')) {
+          subscription?.cancel();
+          if (!completer.isCompleted) {
+            completer.completeError(
+                HttpException('DOH 服务器返回错误: $statusLine'));
+          }
+          return;
+        }
+
+        final headersLower = headerStr.toLowerCase();
+
+        // 处理 chunked 编码
+        if (headersLower.contains('transfer-encoding: chunked')) {
+          // chunked 模式需要等待完整数据（以 0\r\n\r\n 结尾）
+          if (_isChunkedComplete(allBytes, bodyStart)) {
+            subscription?.cancel();
+            final body = Uint8List.fromList(allBytes.sublist(bodyStart));
+            if (!completer.isCompleted) {
+              completer.complete(_decodeChunked(body));
+            }
+          }
+          return;
+        }
+
+        // 处理 Content-Length
+        final clMatch =
+            RegExp(r'content-length:\s*(\d+)').firstMatch(headersLower);
+        if (clMatch != null) {
+          final contentLength = int.parse(clMatch.group(1)!);
+          if (allBytes.length >= bodyStart + contentLength) {
+            subscription?.cancel();
+            if (!completer.isCompleted) {
+              completer.complete(Uint8List.fromList(
+                  allBytes.sublist(bodyStart, bodyStart + contentLength)));
+            }
+          }
+          return;
+        }
+
+        // 没有 Content-Length 也没有 chunked，等连接关闭
+      },
+      onDone: () {
+        if (!completer.isCompleted) {
+          final headerEndIndex = _findHeaderEnd(allBytes);
+          if (headerEndIndex == -1) {
+            completer.complete(null);
+            return;
+          }
+          final bodyStart = headerEndIndex + 4;
+          if (bodyStart < allBytes.length) {
+            completer
+                .complete(Uint8List.fromList(allBytes.sublist(bodyStart)));
+          } else {
+            completer.complete(null);
+          }
+        }
+      },
+      onError: (error) {
+        if (!completer.isCompleted) {
+          completer.completeError(error);
+        }
+      },
+    );
+
+    return completer.future.timeout(timeout, onTimeout: () {
+      subscription?.cancel();
+      return null;
+    });
+  }
+
+  /// 在字节流中查找 \r\n\r\n 的位置
+  int _findHeaderEnd(List<int> bytes) {
+    for (var i = 0; i <= bytes.length - 4; i++) {
+      if (bytes[i] == 0x0D &&
+          bytes[i + 1] == 0x0A &&
+          bytes[i + 2] == 0x0D &&
+          bytes[i + 3] == 0x0A) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /// 检查 chunked 编码数据是否完整（以 0\r\n\r\n 结尾）
+  bool _isChunkedComplete(List<int> bytes, int bodyStart) {
+    if (bytes.length < bodyStart + 5) return false;
+    final len = bytes.length;
+    // 检查末尾是否为 0\r\n\r\n
+    return (bytes[len - 5] == 0x30 && // '0'
+        bytes[len - 4] == 0x0D &&
+        bytes[len - 3] == 0x0A &&
+        bytes[len - 2] == 0x0D &&
+        bytes[len - 1] == 0x0A);
   }
 
   /// 解码 chunked 传输编码
@@ -224,9 +393,10 @@ class BootstrapDohClient {
   Uint8List _buildDnsQuery(String host, {DnsRecordType type = DnsRecordType.a}) {
     final buffer = BytesBuilder();
 
-    // Transaction ID (2 bytes) - 随机
-    buffer.addByte(0x00);
-    buffer.addByte(0x01);
+    // Transaction ID (2 bytes) - 随机生成
+    final txId = _random.nextInt(0xFFFF);
+    buffer.addByte((txId >> 8) & 0xFF);
+    buffer.addByte(txId & 0xFF);
 
     // Flags (2 bytes) - 标准查询，递归
     buffer.addByte(0x01); // RD = 1
@@ -256,7 +426,7 @@ class BootstrapDohClient {
     }
     buffer.addByte(0x00); // 结束标记
 
-    // QTYPE (2 bytes) - A 记录 = 1, AAAA 记录 = 28
+    // QTYPE (2 bytes)
     buffer.addByte((type.value >> 8) & 0xFF);
     buffer.addByte(type.value & 0xFF);
 
@@ -267,11 +437,13 @@ class BootstrapDohClient {
     return buffer.toBytes();
   }
 
-  /// 解析 DNS 响应
-  List<InternetAddress> _parseDnsResponse(Uint8List data) {
-    if (data.length < 12) return [];
+  /// 解析 DNS 响应，提取地址和 TTL
+  DnsResult _parseDnsResponse(Uint8List data) {
+    if (data.length < 12) return DnsResult(addresses: [], minTtl: 300);
 
     final addresses = <InternetAddress>[];
+    var minTtl = 0x7FFFFFFF; // 初始化为最大值
+    var hasRecord = false;
 
     // 跳过头部 (12 bytes)
     var offset = 12;
@@ -299,7 +471,11 @@ class BootstrapDohClient {
       // CLASS (2 bytes)
       offset += 2;
 
-      // TTL (4 bytes)
+      // TTL (4 bytes) - 提取 TTL
+      final ttl = (data[offset] << 24) |
+          (data[offset + 1] << 16) |
+          (data[offset + 2] << 8) |
+          data[offset + 3];
       offset += 4;
 
       // RDLENGTH (2 bytes)
@@ -311,21 +487,30 @@ class BootstrapDohClient {
       // RDATA
       if (type == 1 && rdlength == 4) {
         // A 记录 (IPv4)
-        final ip = '${data[offset]}.${data[offset + 1]}.${data[offset + 2]}.${data[offset + 3]}';
+        final ip =
+            '${data[offset]}.${data[offset + 1]}.${data[offset + 2]}.${data[offset + 3]}';
         addresses.add(InternetAddress(ip));
+        hasRecord = true;
+        if (ttl < minTtl) minTtl = ttl;
       } else if (type == 28 && rdlength == 16) {
         // AAAA 记录 (IPv6)
         final parts = <String>[];
         for (var j = 0; j < 16; j += 2) {
-          parts.add(((data[offset + j] << 8) | data[offset + j + 1]).toRadixString(16));
+          parts.add(
+              ((data[offset + j] << 8) | data[offset + j + 1]).toRadixString(16));
         }
         addresses.add(InternetAddress(parts.join(':')));
+        hasRecord = true;
+        if (ttl < minTtl) minTtl = ttl;
       }
 
       offset += rdlength;
     }
 
-    return addresses;
+    // 限制 TTL 范围：最小 60 秒，最大 1800 秒（30 分钟）
+    final clampedTtl = hasRecord ? minTtl.clamp(60, 1800) : 300;
+
+    return DnsResult(addresses: addresses, minTtl: clampedTtl);
   }
 
   /// 跳过 DNS 名称字段
@@ -345,6 +530,6 @@ class BootstrapDohClient {
   }
 
   void close() {
-    // 无需清理，每次请求都是新连接
+    _closeSocket();
   }
 }

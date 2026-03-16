@@ -55,6 +55,7 @@ class DohProxyService {
     bool enableDoh = true,
     bool preferIPv6 = false,
     String? dohServer,
+    String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
     int? upstreamPort,
@@ -93,6 +94,7 @@ class DohProxyService {
         enableDoh,
         preferIPv6,
         dohServer,
+        serverIp,
         upstreamProtocol,
         upstreamHost,
         upstreamPort,
@@ -106,6 +108,7 @@ class DohProxyService {
         enableDoh,
         preferIPv6,
         dohServer,
+        serverIp,
         upstreamProtocol,
         upstreamHost,
         upstreamPort,
@@ -122,6 +125,7 @@ class DohProxyService {
     bool enableDoh,
     bool preferIPv6,
     String? dohServer,
+    String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
     int? upstreamPort,
@@ -142,6 +146,7 @@ class DohProxyService {
           enableDoh: enableDoh,
           preferIpv6: preferIPv6,
           dohServer: dohServer,
+          serverIp: serverIp,
           upstreamProtocol: upstreamProtocol,
           upstreamHost: upstreamHost,
           upstreamPort: upstreamPort,
@@ -186,6 +191,7 @@ class DohProxyService {
     bool enableDoh,
     bool preferIPv6,
     String? dohServer,
+    String? serverIp,
     String? upstreamProtocol,
     String? upstreamHost,
     int? upstreamPort,
@@ -213,6 +219,10 @@ class DohProxyService {
         if (dohServer != null && dohServer.isNotEmpty) ...[
           '--doh',
           dohServer,
+        ],
+        if (serverIp != null && serverIp.isNotEmpty) ...[
+          '--server-ip',
+          serverIp,
         ],
         if (upstreamHost != null && upstreamHost.isNotEmpty) ...[
           '--upstream-protocol',
@@ -431,6 +441,7 @@ class DohProxyService {
     required bool enableDoh,
     required bool preferIpv6,
     required String? dohServer,
+    required String? serverIp,
     required String? upstreamProtocol,
     required String? upstreamHost,
     required int? upstreamPort,
@@ -446,6 +457,7 @@ class DohProxyService {
       'enableDoh': enableDoh,
       'preferIpv6': preferIpv6,
       'dohServer': dohServer,
+      'serverIp': serverIp,
       'upstreamProtocol': upstreamProtocol,
       'upstreamHost': upstreamHost,
       'upstreamPort': upstreamPort,
@@ -565,6 +577,7 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
           final enableDoh = message['enableDoh'] as bool? ?? true;
           final preferIpv6 = message['preferIpv6'] as bool? ?? false;
           final dohServer = message['dohServer'] as String?;
+          final serverIp = message['serverIp'] as String?;
           final upstreamProtocol = message['upstreamProtocol'] as String?;
           final upstreamHost = message['upstreamHost'] as String?;
           final upstreamPort = message['upstreamPort'] as int?;
@@ -576,6 +589,7 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
             enableDoh: enableDoh,
             preferIpv6: preferIpv6,
             dohServer: dohServer,
+            serverIp: serverIp,
             upstreamProtocol: upstreamProtocol,
             upstreamHost: upstreamHost,
             upstreamPort: upstreamPort,
@@ -589,6 +603,7 @@ void _ffiIsolateEntry(SendPort mainSendPort) {
               enableDoh: enableDoh,
               preferIpv6: preferIpv6,
               dohServer: dohServer,
+              serverIp: serverIp,
               upstreamProtocol: upstreamProtocol,
               upstreamHost: upstreamHost,
               upstreamPort: upstreamPort,
