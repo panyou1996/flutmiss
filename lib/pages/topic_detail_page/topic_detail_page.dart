@@ -281,6 +281,12 @@ class _TopicDetailPageState extends ConsumerState<TopicDetailPage>
 
     if (shouldRun) {
       _screenTrack.start(widget.topicId);
+      // start() 会 reset _onscreen，用 controller 当前已知的可见帖子恢复
+      // 避免因 CF 验证等场景 stop→start 后 _onscreen 为空导致无法记录阅读时长
+      if (_controller.visiblePostNumbers.isNotEmpty) {
+        _screenTrack.setOnscreen(_controller.visiblePostNumbers);
+        _screenTrack.scrolled();
+      }
     } else {
       _screenTrack.stop();
     }

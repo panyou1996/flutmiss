@@ -218,9 +218,9 @@ class CookieJarService {
           continue;
         }
 
-        // 跳过空值的认证 cookie：防止覆盖 CookieJar 中的有效值
-        if (cookie.value.isEmpty && _isAuthCookie(cookie.name)) {
-          debugPrint('[CookieJar] syncFromWebView: 跳过空值认证 cookie ${cookie.name}');
+        // 跳过空值的关键 cookie：防止覆盖 CookieJar 中的有效值
+        if (cookie.value.isEmpty && _isCriticalCookie(cookie.name)) {
+          debugPrint('[CookieJar] syncFromWebView: 跳过空值关键 cookie ${cookie.name}');
           continue;
         }
 
@@ -563,8 +563,8 @@ class CookieJarService {
     return hosts.toList();
   }
 
-  /// 是否是认证关键 cookie（丢失会导致登出）
-  static bool _isAuthCookie(String name) {
-    return name == '_t' || name == '_forum_session';
+  /// 是否是关键 cookie（空值不应覆盖 CookieJar 中的有效值）
+  static bool _isCriticalCookie(String name) {
+    return name == '_t' || name == '_forum_session' || name == 'cf_clearance';
   }
 }

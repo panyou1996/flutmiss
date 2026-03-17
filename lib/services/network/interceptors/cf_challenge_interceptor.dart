@@ -58,22 +58,46 @@ class CfChallengeInterceptor extends Interceptor {
     return true;
   }
 
+  /// 综合响应头 + 响应体判断是否是 CF 验证页面
+  /// 仅靠响应体文本匹配容易误判（用户帖子含关键词、Discourse 自身 403 等），
+  /// 加上响应头校验可以从源头过滤掉非 CF 的 403。
+  static bool _isCfChallengeResponse(Response? response) {
+    if (response == null) return false;
+
+    final headers = response.headers;
+
+    // 1. 必须来自 Cloudflare（server: cloudflare）
+    final server = headers.value('server') ?? '';
+    if (!server.toLowerCase().contains('cloudflare')) return false;
+
+    // 2. Content-Type 必须是 HTML（Discourse 自身的 403 返回 JSON）
+    final contentType = headers.value('content-type') ?? '';
+    if (!contentType.contains('text/html')) return false;
+
+    // 3. 如果有 cf-mitigated: challenge 头，直接确认
+    final cfMitigated = headers.value('cf-mitigated') ?? '';
+    if (cfMitigated.contains('challenge')) return true;
+
+    // 4. 兜底：检查响应体内容
+    return CfChallengeService.isCfChallenge(response.data);
+  }
+
   @override
   Future<void> onError(
     DioException err,
     ErrorInterceptorHandler handler,
   ) async {
     final statusCode = err.response?.statusCode;
-    final data = err.response?.data;
 
     // 检查是否标记跳过 CF 验证（防止重试后再次触发）
     final skipCfChallenge = err.requestOptions.extra['skipCfChallenge'] == true;
 
     if (statusCode == 403 &&
-        CfChallengeService.isCfChallenge(data) &&
-        !skipCfChallenge) {
+        !skipCfChallenge &&
+        _isCfChallengeResponse(err.response)) {
       // 备选提取 sitekey（从 403 响应体中）
-      CfClearanceRefreshService().extractAndUpdateSitekey(data.toString());
+      CfClearanceRefreshService().extractAndUpdateSitekey(
+          err.response?.data?.toString() ?? '');
       // 403 说明 cf_clearance 已失效，停止自动续期（避免与手动验证冲突）
       CfClearanceRefreshService().stop();
 

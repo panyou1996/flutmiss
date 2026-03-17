@@ -18,6 +18,10 @@ class CfChallengeService {
   CfChallengeService._internal();
 
   bool _isVerifying = false;
+
+  /// CF 验证是否正在进行中（用于外部判断是否应忽略路由变化）
+  bool get isVerifying => _isVerifying;
+
   final _verifyCompleter = <Completer<bool>>[];
   BuildContext? _context;
   static DateTime? _lastToastAt;
@@ -82,13 +86,31 @@ class CfChallengeService {
     }
   }
 
-  /// 检测是否是 CF 验证页面
+  /// 检测是否是 CF 验证页面（用于 403 响应体判断）
   static bool isCfChallenge(dynamic responseData) {
     if (responseData == null) return false;
     final str = responseData.toString();
-    return str.contains('Just a moment') ||
-           str.contains('cf_chl_opt') ||
-           str.contains('challenge-platform');
+    // cf_chl_opt 是 CF 验证页面的可靠标记（challenge options JS 变量）
+    if (str.contains('cf_chl_opt')) return true;
+    // challenge-platform 路径需配合 cloudflare 标记，避免误匹配
+    if (str.contains('challenge-platform') && str.contains('cloudflare')) {
+      return true;
+    }
+    // "Just a moment" 需配合 CF 特征，避免误匹配用户内容
+    if (str.contains('Just a moment') &&
+        (str.contains('cloudflare') || str.contains('cf-challenge'))) {
+      return true;
+    }
+    return false;
+  }
+
+  /// 检测页面 HTML 中是否有活跃的 CF 验证盾
+  /// 用于判断已加载的页面是否仍在展示验证挑战
+  static bool hasActiveCfChallenge(String html) {
+    return html.contains('cf-turnstile') ||
+        html.contains('challenge-running') ||
+        html.contains('challenge-stage') ||
+        html.contains('cf_chl_opt');
   }
 
   /// 显示手动验证页面
@@ -157,10 +179,13 @@ class CfChallengeService {
     // 停止自动续期服务，避免与手动验证冲突
     CfClearanceRefreshService().stop();
 
-    // Dio 请求已经 403，说明当前 cf_clearance 失效了。
+    // 备份旧 cf_clearance，验证失败时恢复（避免误删仍有效的值）
+    final cookieJarService = CookieJarService();
+    final backupCfClearance = await cookieJarService.getCfClearanceCookie();
+
+    // Dio 请求已经 403，说明当前 cf_clearance 可能失效了。
     // 在同步到 WebView 前删除它，否则 WebView 带着旧 cf_clearance 访问
     // /challenge 时 CF 会直接放行，导致验证被跳过。
-    final cookieJarService = CookieJarService();
     await cookieJarService.deleteCookie('cf_clearance');
     await cookieJarService.syncToWebView();
     if (!overlayState.mounted) {
@@ -265,6 +290,11 @@ class CfChallengeService {
       // 手动验证成功后重新启动自动续期
       CfClearanceRefreshService().start();
     } else {
+      // 验证失败，恢复备份的 cf_clearance（避免丢失可能仍有效的值）
+      if (backupCfClearance != null) {
+        await cookieJarService.restoreCfClearance(backupCfClearance);
+        debugPrint('[CfChallenge] 验证失败，已恢复备份 cf_clearance');
+      }
       // 验证失败，启动冷却期
       startCooldown();
       debugPrint('[CfChallenge] Verification failed, cooldown until $_cooldownUntil');
@@ -301,8 +331,10 @@ class _CfChallengePageState extends State<CfChallengePage> {
   late bool _isBackground;
   int _checkCount = 0;
   Timer? _timeoutTimer;
+  Timer? _noChallengeCheckTimer;
   static const _backgroundMaxCheckCount = 10;
   static const _foregroundMaxCheckCount = 60;
+  static const _noChallengeCheckDelay = Duration(seconds: 5);
 
   /// 验证页面加载时 WebView 中的 cf_clearance 快照
   /// 用于区分「旧值残留」和「验证后新设的值」
@@ -338,6 +370,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
   @override
   void dispose() {
     _timeoutTimer?.cancel();
+    _noChallengeCheckTimer?.cancel();
     _controller?.dispose();
     super.dispose();
   }
@@ -428,7 +461,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
       final html = await _controller?.evaluateJavascript(
         source: 'document.body ? document.body.innerHTML : ""',
       );
-      if (html != null && CfChallengeService.isCfChallenge(html)) {
+      if (html != null && CfChallengeService.hasActiveCfChallenge(html)) {
         debugPrint('[CfChallenge] 检测到新 cf_clearance 但页面仍在验证中，继续等待');
         return;
       }
@@ -490,6 +523,61 @@ class _CfChallengePageState extends State<CfChallengePage> {
             if (mounted) _finish(false);
           });
         }
+      }
+    });
+  }
+
+  /// 延迟检测页面是否存在 CF 验证盾
+  /// 如果页面加载完成后没有盾，快速退出避免死等超时导致循环
+  void _scheduleNoChallengeCheck(InAppWebViewController controller) {
+    _noChallengeCheckTimer?.cancel();
+    _noChallengeCheckTimer = Timer(_noChallengeCheckDelay, () async {
+      if (_hasPopped || !mounted) return;
+
+      try {
+        final html = await controller.evaluateJavascript(
+          source: 'document.body ? document.body.innerHTML : ""',
+        );
+        if (_hasPopped) return;
+        if (html == null) return;
+
+        final hasChallenge =
+            CfChallengeService.hasActiveCfChallenge(html.toString());
+        if (hasChallenge) return; // 页面有盾，等待正常验证流程
+
+        // 页面没有盾，检查是否已有新的 cf_clearance（CF 可能自动放行了）
+        final cookie = await CookieManager.instance().getCookie(
+          url: WebUri(AppConstants.baseUrl),
+          name: 'cf_clearance',
+        );
+        if (_hasPopped) return;
+
+        if (cookie != null &&
+            cookie.value.isNotEmpty &&
+            (_initialCfClearance == null ||
+                _initialCfClearance!.isEmpty ||
+                cookie.value != _initialCfClearance)) {
+          debugPrint('[CfChallenge] 页面无盾但检测到新 cf_clearance，自动完成');
+          CfChallengeLogger.logVerifyResult(
+            success: true,
+            reason: 'no challenge but new cf_clearance detected',
+          );
+          await CookieJarService().syncFromWebView();
+          _timeoutTimer?.cancel();
+          if (mounted) _finish(true);
+        } else {
+          // 没有盾也没有新 cookie，非 CF 验证场景，快速退出
+          debugPrint('[CfChallenge] 页面无盾且无新 cf_clearance，快速退出');
+          CfChallengeLogger.logVerifyResult(
+            success: false,
+            reason:
+                'no challenge detected after ${_noChallengeCheckDelay.inSeconds}s',
+          );
+          _timeoutTimer?.cancel();
+          if (mounted) _finish(false);
+        }
+      } catch (e) {
+        debugPrint('[CfChallenge] 检测 challenge 状态异常: $e');
       }
     });
   }
@@ -557,6 +645,7 @@ class _CfChallengePageState extends State<CfChallengePage> {
 
   void _refresh() {
     _timeoutTimer?.cancel();
+    _noChallengeCheckTimer?.cancel();
     _checkCount = 0;
     setState(() {
       _isLoading = true;
@@ -713,6 +802,8 @@ class _CfChallengePageState extends State<CfChallengePage> {
                               // 注入 XHR/fetch 拦截脚本
                               _injectChallengeInterceptor(controller);
                               _startTimeout();
+                              // 延迟检测页面是否存在 CF 验证盾，无盾则快速退出
+                              _scheduleNoChallengeCheck(controller);
                             },
                             onReceivedError: (controller, request, error) {
                               if (mounted) {

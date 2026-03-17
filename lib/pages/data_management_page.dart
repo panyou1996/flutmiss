@@ -160,11 +160,14 @@ class _DataManagementPageState extends ConsumerState<DataManagementPage> {
     }
   }
 
-  /// 清除 Cookie 文件和内存
+  /// 清除 Cookie 文件和内存（保留 cf_clearance）
   Future<void> _doClearCookies() async {
-    // 清除 CookieJar 内存中的 cookie
-    final cookieJar = CookieJarService().cookieJar;
-    await cookieJar.deleteAll();
+    final cookieJarService = CookieJarService();
+    final cfClearanceCookie = await cookieJarService.getCfClearanceCookie();
+    await cookieJarService.cookieJar.deleteAll();
+    if (cfClearanceCookie != null) {
+      await cookieJarService.restoreCfClearance(cfClearanceCookie);
+    }
   }
 
   Future<void> _exportData() async {
