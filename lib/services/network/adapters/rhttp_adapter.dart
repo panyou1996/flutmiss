@@ -368,7 +368,14 @@ class _RhttpDelegate {
 
       return _RhttpFetchResult(
         responseBody: ResponseBody(
-          response.body.cast<Uint8List>(),
+          response.body.cast<Uint8List>().handleError(
+            // flutter_rust_bridge STREAM_CANCEL_ERROR：
+            // Dart 端取消了流（页面销毁/请求取消），Rust 端写入已关闭的 StreamSink。
+            // 等价于流正常结束，静默吞掉避免 SIGABRT 崩溃。
+            (error) {},
+            test: (error) =>
+                error.toString().contains('STREAM_CANCEL_ERROR'),
+          ),
           response.statusCode,
           headers: response.headerMapList,
           isRedirect: false,
