@@ -118,10 +118,15 @@ Future<void> main() async {
           ? acrylic.WindowEffect.mica
           : acrylic.WindowEffect.transparent,
     );
-    await windowManager.waitUntilReadyToShow(null, () async {
-      await windowManager.setPreventClose(true);
-      await WindowStateService.instance.restore(prefs);
-    });
+    final isVisible = await windowManager.isVisible();
+    await windowManager.setPreventClose(true);
+    if (isVisible) {
+      await WindowStateService.instance.attach(prefs);
+    } else {
+      await windowManager.waitUntilReadyToShow(null, () async {
+        await WindowStateService.instance.restore(prefs);
+      });
+    }
   }
 
   // 阶段 2：依赖 prefs 的步骤并行
