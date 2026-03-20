@@ -67,6 +67,7 @@ import 'widgets/preheat_gate.dart';
 import 'widgets/onboarding_gate.dart';
 import 'widgets/layout/adaptive_scaffold.dart';
 import 'widgets/layout/adaptive_navigation.dart';
+import 'widgets/notification/notification_quick_panel.dart';
 import 'widgets/read_later/read_later_bubble.dart';
 import 'providers/read_later_provider.dart';
 
@@ -645,6 +646,10 @@ class _MainPageState extends ConsumerState<MainPage>
       canPop: false,
       onPopInvokedWithResult: (bool didPop, dynamic result) {
         if (didPop) return;
+        if (NotificationQuickPanel.isVisible) {
+          NotificationQuickPanel.dismiss();
+          return;
+        }
         final now = DateTime.now();
         if (_lastBackPressTime != null &&
             now.difference(_lastBackPressTime!).inMilliseconds < 2000) {

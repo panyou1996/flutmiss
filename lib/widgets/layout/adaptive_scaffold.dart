@@ -50,49 +50,55 @@ class AdaptiveScaffold extends ConsumerWidget {
 
     final isDesktop = Platform.isMacOS || Platform.isWindows || Platform.isLinux;
     final useAcrylicRail = showRail && isDesktop;
+    final railWidth = extendedRail ? 180.0 : 72.0;
+    final overlayLeftInset = showRail
+        ? railWidth + (useAcrylicRail ? 0.0 : 1.0)
+        : 0.0;
 
-    return Scaffold(
-      backgroundColor: useAcrylicRail ? Colors.transparent : null,
-      body: Row(
-        children: [
-          if (showRail) ...[
-            AdaptiveNavigationRail(
-              selectedIndex: selectedIndex,
-              onDestinationSelected: onDestinationSelected,
-              destinations: destinations,
-              extended: extendedRail,
-              leading: railLeading,
-              bottomLeading: railBottomLeading,
-            ),
-            if (!useAcrylicRail)
-              const VerticalDivider(thickness: 1, width: 1),
-          ],
-          Expanded(
-            key: const ValueKey('adaptive-body'),
-            // 桌面 acrylic 模式：用 Material 给 body 提供不透明背景
-            // TopicsScreen 等页面没有自己的 Scaffold，
-            // Material 和 Scaffold 内部是同一个组件，不会产生双层背景
-            child: Stack(
-              children: [
-                useAcrylicRail
+    return Stack(
+      children: [
+        Scaffold(
+          backgroundColor: useAcrylicRail ? Colors.transparent : null,
+          body: Row(
+            children: [
+              if (showRail) ...[
+                AdaptiveNavigationRail(
+                  selectedIndex: selectedIndex,
+                  onDestinationSelected: onDestinationSelected,
+                  destinations: destinations,
+                  extended: extendedRail,
+                  leading: railLeading,
+                  bottomLeading: railBottomLeading,
+                ),
+                if (!useAcrylicRail)
+                  const VerticalDivider(thickness: 1, width: 1),
+              ],
+              Expanded(
+                key: const ValueKey('adaptive-body'),
+                // 桌面 acrylic 模式：用 Material 给 body 提供不透明背景
+                // TopicsScreen 等页面没有自己的 Scaffold，
+                // Material 和 Scaffold 内部是同一个组件，不会产生双层背景
+                child: useAcrylicRail
                     ? Material(color: Theme.of(context).colorScheme.surface, child: body)
                     : body,
-                // 通知面板（在 widget 树中，低于路由层，新页面自然覆盖）
-                const SidebarNotificationPanel(),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
-      floatingActionButton: floatingActionButton,
-      bottomNavigationBar: showRail
-          ? null
-          : _AnimatedBottomNav(
-              visibility: visibility,
-              selectedIndex: selectedIndex,
-              onDestinationSelected: onDestinationSelected,
-              destinations: destinations,
-            ),
+          floatingActionButton: floatingActionButton,
+          bottomNavigationBar: showRail
+              ? null
+              : _AnimatedBottomNav(
+                  visibility: visibility,
+                  selectedIndex: selectedIndex,
+                  onDestinationSelected: onDestinationSelected,
+                  destinations: destinations,
+                ),
+        ),
+        Positioned.fill(
+          left: overlayLeftInset,
+          child: const SidebarNotificationPanel(),
+        ),
+      ],
     );
   }
 }

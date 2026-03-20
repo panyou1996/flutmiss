@@ -17,6 +17,7 @@ class NotificationQuickPanel {
   /// 侧栏模式面板可见性
   static final ValueNotifier<bool> _visible = ValueNotifier(false);
   static ValueNotifier<bool> get visible => _visible;
+  static bool get isVisible => _visible.value;
 
   /// 弹出或关闭快捷面板
   static Future<void> show(BuildContext context) {
@@ -59,14 +60,22 @@ class _SidebarNotificationPanelState extends State<SidebarNotificationPanel>
       reverseCurve: Curves.easeInCubic,
     );
     NotificationQuickPanel._visible.addListener(_onVisibilityChanged);
+    _animController.addStatusListener(_onAnimationStatusChanged);
   }
 
   @override
   void dispose() {
     NotificationQuickPanel._visible.removeListener(_onVisibilityChanged);
+    _animController.removeStatusListener(_onAnimationStatusChanged);
     _animController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onAnimationStatusChanged(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed && _dragOffset != 0) {
+      setState(() => _dragOffset = 0);
+    }
   }
 
   void _onVisibilityChanged() {
@@ -81,6 +90,24 @@ class _SidebarNotificationPanelState extends State<SidebarNotificationPanel>
 
   double _dragOffset = 0;
   final _contentKey = GlobalKey();
+
+  void _handleMobileDragUpdate(DragUpdateDetails details) {
+    final nextOffset = (_dragOffset + details.delta.dy).clamp(0.0, double.infinity);
+    if (nextOffset == _dragOffset) return;
+    setState(() => _dragOffset = nextOffset);
+  }
+
+  void _handleMobileDragEnd(DragEndDetails details, double panelHeight) {
+    final shouldDismiss = _dragOffset > panelHeight * 0.2 ||
+        (details.primaryVelocity ?? 0) > 500;
+    if (shouldDismiss) {
+      NotificationQuickPanel.dismiss();
+      return;
+    }
+    if (_dragOffset != 0) {
+      setState(() => _dragOffset = 0);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -115,7 +142,18 @@ class _SidebarNotificationPanelState extends State<SidebarNotificationPanel>
               : const BorderRadius.vertical(top: Radius.circular(20)),
           child: Column(
             children: [
-              if (!showRail) const _DragHandle(),
+              if (!showRail)
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onVerticalDragUpdate: _handleMobileDragUpdate,
+                  onVerticalDragEnd: (details) =>
+                      _handleMobileDragEnd(details, MediaQuery.sizeOf(context).height * 0.8),
+                  child: const SizedBox(
+                    width: double.infinity,
+                    height: 28,
+                    child: _DragHandle(),
+                  ),
+                ),
               Expanded(child: content),
             ],
           ),
@@ -165,6 +203,7 @@ class _SidebarNotificationPanelState extends State<SidebarNotificationPanel>
     final screenHeight = MediaQuery.sizeOf(context).height;
     final panelHeight = screenHeight * 0.8;
     final slideOffset = (1 - _animation.value) * panelHeight;
+    final dragOffset = _dragOffset.clamp(0.0, panelHeight);
 
     return Stack(
       clipBehavior: Clip.none,
@@ -177,25 +216,15 @@ class _SidebarNotificationPanelState extends State<SidebarNotificationPanel>
             ),
           ),
         ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: -slideOffset - _dragOffset.clamp(0.0, panelHeight),
-          height: panelHeight,
-          child: GestureDetector(
-            onVerticalDragUpdate: (d) {
-              setState(() => _dragOffset += d.delta.dy);
-            },
-            onVerticalDragEnd: (d) {
-              if (_dragOffset > panelHeight * 0.2 ||
-                  (d.primaryVelocity ?? 0) > 500) {
-                NotificationQuickPanel.dismiss();
-                setState(() => _dragOffset = 0);
-              } else {
-                setState(() => _dragOffset = 0);
-              }
-            },
-            child: child,
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: Transform.translate(
+            offset: Offset(0, slideOffset + dragOffset),
+            child: SizedBox(
+              width: double.infinity,
+              height: panelHeight,
+              child: child,
+            ),
           ),
         ),
       ],
