@@ -9772,6 +9772,36 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'服务器、IPv6、ECH 等'**
   String get dohSettings_moreSettingsDesc;
+
+  /// No description provided for @template_insertTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'插入模板'**
+  String get template_insertTitle;
+
+  /// No description provided for @template_searchHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索模板…'**
+  String get template_searchHint;
+
+  /// No description provided for @template_empty.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无可用模板'**
+  String get template_empty;
+
+  /// No description provided for @template_loadError.
+  ///
+  /// In zh, this message translates to:
+  /// **'加载模板失败'**
+  String get template_loadError;
+
+  /// No description provided for @template_tooltip.
+  ///
+  /// In zh, this message translates to:
+  /// **'模板'**
+  String get template_tooltip;
 }
 
 class _AppLocalizationsDelegate

@@ -5248,6 +5248,21 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get dohSettings_moreSettingsDesc => '服务器、IPv6、ECH 等';
+
+  @override
+  String get template_insertTitle => '插入模板';
+
+  @override
+  String get template_searchHint => '搜索模板…';
+
+  @override
+  String get template_empty => '暂无可用模板';
+
+  @override
+  String get template_loadError => '加载模板失败';
+
+  @override
+  String get template_tooltip => '模板';
 }
 
 /// The translations for Chinese, as used in Hong Kong (`zh_HK`).
@@ -10373,6 +10388,21 @@ class AppLocalizationsZhHk extends AppLocalizationsZh {
 
   @override
   String get dohSettings_moreSettingsDesc => '服務器、IPv6、ECH 等';
+
+  @override
+  String get template_insertTitle => '插入模板';
+
+  @override
+  String get template_searchHint => '搜索模板…';
+
+  @override
+  String get template_empty => '暫無可用模板';
+
+  @override
+  String get template_loadError => '加載模板失敗';
+
+  @override
+  String get template_tooltip => '模板';
 }
 
 /// The translations for Chinese, as used in Taiwan (`zh_TW`).
@@ -15498,4 +15528,19 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get dohSettings_moreSettingsDesc => '伺服器、IPv6、ECH 等';
+
+  @override
+  String get template_insertTitle => '插入範本';
+
+  @override
+  String get template_searchHint => '搜尋範本…';
+
+  @override
+  String get template_empty => '暫無可用範本';
+
+  @override
+  String get template_loadError => '載入範本失敗';
+
+  @override
+  String get template_tooltip => '範本';
 }

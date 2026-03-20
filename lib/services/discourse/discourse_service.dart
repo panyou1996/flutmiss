@@ -16,6 +16,7 @@ import '../../models/tag_search_result.dart';
 import '../../models/mention_user.dart';
 import '../../models/draft.dart';
 import '../../models/invite_link.dart';
+import '../../models/template.dart';
 
 import '../../constants.dart';
 import '../../providers/message_bus_providers.dart';
@@ -45,6 +46,7 @@ part '_presence.dart';
 part '_categories.dart';
 part '_utils.dart';
 part '_drafts.dart';
+part '_templates.dart';
 
 /// 基类，包含所有共享字段
 abstract class _DiscourseServiceBase {
@@ -101,7 +103,8 @@ class DiscourseService extends _DiscourseServiceBase
         _PresenceMixin,
         _CategoriesMixin,
         _UtilsMixin,
-        _DraftsMixin {
+        _DraftsMixin,
+        _TemplatesMixin {
   static const String baseUrl = AppConstants.baseUrl;
   static const String _usernameKey = 'linux_do_username';
   static const _summaryCacheDuration = Duration(minutes: 5);

@@ -5361,4 +5361,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get dohSettings_moreSettingsDesc => 'Servers, IPv6, ECH, etc.';
+
+  @override
+  String get template_insertTitle => 'Insert Template';
+
+  @override
+  String get template_searchHint => 'Search templates...';
+
+  @override
+  String get template_empty => 'No templates available';
+
+  @override
+  String get template_loadError => 'Failed to load templates';
+
+  @override
+  String get template_tooltip => 'Template';
 }

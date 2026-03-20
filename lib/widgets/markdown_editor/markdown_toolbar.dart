@@ -16,6 +16,7 @@ import '../../services/toast_service.dart';
 import '../common/fading_edge_scroll_view.dart';
 import 'image_upload_dialog.dart';
 import 'link_insert_dialog.dart';
+import 'template_insert_dialog.dart';
 import '../../../../../l10n/s.dart';
 
 /// Markdown 工具栏组件
@@ -635,6 +636,17 @@ class MarkdownToolbarState extends State<MarkdownToolbar> {
     ToastService.showInfo(message);
   }
 
+  /// 插入模板（显示模板选择弹窗）
+  Future<void> insertTemplate(BuildContext context) async {
+    final template = await showTemplateInsertDialog(context);
+    if (template == null) {
+      widget.focusNode?.requestFocus();
+      return;
+    }
+    insertText(template.content);
+    widget.focusNode?.requestFocus();
+  }
+
   /// 插入引用（带占位符并自动选中）
   void insertQuote() {
     final selection = widget.controller.selection;
@@ -890,6 +902,11 @@ class MarkdownToolbarState extends State<MarkdownToolbar> {
                         _ToolbarButton(
                           icon: FontAwesomeIcons.quoteRight,
                           onPressed: insertQuote,
+                        ),
+                        _ToolbarButton(
+                          icon: FontAwesomeIcons.clipboard,
+                          onPressed: () => insertTemplate(context),
+                          tooltip: S.current.template_tooltip,
                         ),
                         _ToolbarButton(
                           icon: FontAwesomeIcons.code,

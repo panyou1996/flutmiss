@@ -1789,5 +1789,11 @@
   "dohSettings_proxyStartFailed": "Proxy start failed, DoH/ECH cannot take effect",
   "dohSettings_errorCopied": "Error message copied",
   "dohSettings_moreSettings": "More Settings",
-  "dohSettings_moreSettingsDesc": "Servers, IPv6, ECH, etc."
+  "dohSettings_moreSettingsDesc": "Servers, IPv6, ECH, etc.",
+
+  "template_insertTitle": "Insert Template",
+  "template_searchHint": "Search templates...",
+  "template_empty": "No templates available",
+  "template_loadError": "Failed to load templates",
+  "template_tooltip": "Template"
 }
