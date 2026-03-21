@@ -4,13 +4,13 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // ignore: depend_on_referenced_packages
 import 'package:flutter_riverpod/legacy.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/ai_provider.dart';
 import '../services/ai_chat_storage_service.dart';
 import '../services/ai_provider_service.dart';
+import '../services/resilient_secure_storage.dart';
 
 /// 需要主应用在 ProviderScope.overrides 中注入
 final aiSharedPreferencesProvider = Provider<SharedPreferences>((_) {
@@ -58,7 +58,8 @@ final defaultAiModelKeyProvider = StateProvider<String?>((ref) {
 });
 
 /// 设置默认模型
-Future<void> setDefaultAiModel(WidgetRef ref, String providerId, String modelId) async {
+Future<void> setDefaultAiModel(
+    WidgetRef ref, String providerId, String modelId) async {
   final prefs = ref.read(aiSharedPreferencesProvider);
   final key = '$providerId:$modelId';
   await prefs.setString('ai_default_model', key);
@@ -77,9 +78,7 @@ class AiProviderListNotifier extends StateNotifier<List<AiProvider>> {
   static const String _storageKey = 'ai_providers';
   static const _uuid = Uuid();
 
-  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage(
-    mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-  );
+  static final ResilientSecureStorage _secureStorage = ResilientSecureStorage();
 
   final SharedPreferences _prefs;
 
@@ -180,5 +179,4 @@ class AiProviderListNotifier extends StateNotifier<List<AiProvider>> {
   static Future<void> _deleteApiKey(String providerId) async {
     await _secureStorage.delete(key: 'ai_provider_key_$providerId');
   }
-
 }

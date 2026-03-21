@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../../constants.dart';
 import '../adapters/platform_adapter.dart';
 import 'app_cookie_manager.dart';
 import 'cookie_jar_service.dart';
+import '../../storage/resilient_secure_storage.dart';
 
 /// Cookie 同步服务
 /// 管理 CSRF token，支持自动刷新（对齐 Discourse 官方前端策略）
@@ -17,9 +17,7 @@ class CookieSyncService {
 
   static const String _csrfTokenKey = 'linux_do_csrf_token';
 
-  final FlutterSecureStorage _storage = const FlutterSecureStorage(
-    mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-  );
+  final ResilientSecureStorage _storage = ResilientSecureStorage();
 
   String? _csrfToken;
   Dio? _mainSiteDio;
@@ -66,13 +64,16 @@ class CookieSyncService {
       await cookieJarService.initialize();
     }
 
-    final dio = Dio(BaseOptions(
-      baseUrl: AppConstants.baseUrl,
-      connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 30),
-      followRedirects: false,
-      validateStatus: (status) => status != null && status >= 200 && status < 400,
-    ));
+    final dio = Dio(
+      BaseOptions(
+        baseUrl: AppConstants.baseUrl,
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
+        followRedirects: false,
+        validateStatus: (status) =>
+            status != null && status >= 200 && status < 400,
+      ),
+    );
 
     configurePlatformAdapter(dio);
     dio.interceptors.add(AppCookieManager(cookieJarService.cookieJar));
@@ -85,12 +86,14 @@ class CookieSyncService {
       final dio = await _getMainSiteDio();
       final response = await dio.get(
         '/session/csrf',
-        options: Options(extra: {
-          'skipCsrf': true,
-          'skipAuthCheck': true,
-          'isSilent': true,
-          'skipScheduler': true, // 绕过并发调度，避免与调用方的并发槽位死锁
-        }),
+        options: Options(
+          extra: {
+            'skipCsrf': true,
+            'skipAuthCheck': true,
+            'isSilent': true,
+            'skipScheduler': true, // 绕过并发调度，避免与调用方的并发槽位死锁
+          },
+        ),
       );
       final csrf = (response.data as Map<String, dynamic>?)?['csrf'] as String?;
       if (csrf != null && csrf.isNotEmpty) {

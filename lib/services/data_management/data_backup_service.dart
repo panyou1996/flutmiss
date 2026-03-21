@@ -1,28 +1,27 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../l10n/s.dart';
+import '../storage/resilient_secure_storage.dart';
 
 /// 数据备份导出/导入服务
 class DataBackupService {
-  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage(
-    mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-  );
+  static final ResilientSecureStorage _secureStorage = ResilientSecureStorage();
   static const _apiKeyPrefix = 'ai_provider_key_';
+
   /// 需要备份的 key 前缀
   static const _backupKeyPrefixes = [
-    'pref_',       // 偏好设置
-    'ai_',         // AI 模型配置（API Key 在 SecureStorage 中，不会被导出）
-    'theme_',      // 主题设置
-    'doh_',        // DOH 网络设置
+    'pref_', // 偏好设置
+    'ai_', // AI 模型配置（API Key 在 SecureStorage 中，不会被导出）
+    'theme_', // 主题设置
+    'doh_', // DOH 网络设置
     'http_proxy_', // 代理设置
     'topic_sort_', // 话题排序
-    'search_',     // 搜索设置
+    'search_', // 搜索设置
   ];
 
   /// 需要排除的 key 前缀（AI 聊天记录属于缓存数据，不备份）
@@ -54,7 +53,9 @@ class DataBackupService {
   }
 
   /// 导出数据为 Map
-  static Future<Map<String, dynamic>> exportData(SharedPreferences prefs) async {
+  static Future<Map<String, dynamic>> exportData(
+    SharedPreferences prefs,
+  ) async {
     final pkg = await PackageInfo.fromPlatform();
     final data = <String, Map<String, dynamic>>{};
 
@@ -102,7 +103,9 @@ class DataBackupService {
   }
 
   /// 从 SecureStorage 中导出所有 AI 供应商的 API Key
-  static Future<Map<String, String>> _exportApiKeys(SharedPreferences prefs) async {
+  static Future<Map<String, String>> _exportApiKeys(
+    SharedPreferences prefs,
+  ) async {
     final apiKeys = <String, String>{};
     final providersJson = prefs.getString('ai_providers');
     if (providersJson == null) return apiKeys;

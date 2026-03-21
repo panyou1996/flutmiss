@@ -16,7 +16,9 @@ class SessionGuardInterceptor extends Interceptor {
     // 否则直接使用 session 的 cancelToken
     final existing = options.cancelToken;
     if (existing != null && !existing.isCancelled) {
-      options.cancelToken = _MergedCancelToken(existing, session.cancelToken);
+      final merged = _MergedCancelToken(existing, session.cancelToken);
+      merged.requestOptions = options;
+      options.cancelToken = merged;
     } else {
       options.cancelToken = session.cancelToken;
     }

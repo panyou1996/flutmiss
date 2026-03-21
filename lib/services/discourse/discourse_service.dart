@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart' hide Category;
 import 'package:flutter/material.dart' hide Badge;
 import 'dart:async';
 import 'package:dio/dio.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../models/topic.dart';
 import '../../models/topic_vote.dart';
 import '../../models/user.dart';
@@ -31,6 +30,7 @@ import '../preloaded_data_service.dart';
 import '../auth_log_service.dart';
 import '../log/log_writer.dart';
 import '../network/exceptions/api_exception.dart';
+import '../storage/resilient_secure_storage.dart';
 import '../../l10n/s.dart';
 import '../../utils/url_helper.dart';
 
@@ -51,7 +51,7 @@ part '_templates.dart';
 /// 基类，包含所有共享字段
 abstract class _DiscourseServiceBase {
   Dio get _dio;
-  FlutterSecureStorage get _storage;
+  ResilientSecureStorage get _storage;
   CookieSyncService get _cookieSync;
   CookieJarService get _cookieJar;
   CfChallengeService get _cfChallenge;
@@ -112,7 +112,7 @@ class DiscourseService extends _DiscourseServiceBase
   @override
   final Dio _dio;
   @override
-  final FlutterSecureStorage _storage;
+  final ResilientSecureStorage _storage;
   @override
   final CookieSyncService _cookieSync = CookieSyncService();
   @override
@@ -174,9 +174,7 @@ class DiscourseService extends _DiscourseServiceBase
           'X-Requested-With': 'XMLHttpRequest',
         },
       ),
-      _storage = const FlutterSecureStorage(
-        mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-      ) {
+      _storage = ResilientSecureStorage() {
     _initInterceptors();
   }
 

@@ -1,4 +1,4 @@
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'storage/resilient_secure_storage.dart';
 
 /// 登录凭证安全存储服务（单例）
 class CredentialStoreService {
@@ -9,9 +9,7 @@ class CredentialStoreService {
   static const _keyUsername = 'login_credential_username';
   static const _keyPassword = 'login_credential_password';
 
-  final _storage = const FlutterSecureStorage(
-    mOptions: MacOsOptions(useDataProtectionKeyChain: false),
-  );
+  final _storage = ResilientSecureStorage();
 
   /// 保存凭证
   Future<void> save(String username, String password) async {
@@ -36,6 +34,9 @@ class CredentialStoreService {
   Future<bool> hasCredentials() async {
     final username = await _storage.read(key: _keyUsername);
     final password = await _storage.read(key: _keyPassword);
-    return username != null && password != null && username.isNotEmpty && password.isNotEmpty;
+    return username != null &&
+        password != null &&
+        username.isNotEmpty &&
+        password.isNotEmpty;
   }
 }
