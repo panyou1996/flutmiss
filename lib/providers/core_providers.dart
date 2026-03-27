@@ -45,6 +45,14 @@ class CurrentUserNotifier extends AsyncNotifier<User?> {
   }
 
   Future<User?> _loadUserWithCache(DiscourseService service) async {
+    final hasToken = await service.isLoggedIn();
+    if (!hasToken) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_cacheKey);
+      await prefs.remove(_cacheUserKey);
+      return null;
+    }
+
     // 先尝试从 SP 读取缓存
     final prefs = await SharedPreferences.getInstance();
     final cached = prefs.getString(_cacheKey);

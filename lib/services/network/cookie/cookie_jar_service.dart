@@ -183,7 +183,11 @@ class CookieJarService {
     String name, {
     String? currentUrl,
   }) async {
-    if (!io.Platform.isWindows && !io.Platform.isLinux) return null;
+    if (!io.Platform.isWindows &&
+        !io.Platform.isLinux &&
+        !io.Platform.isAndroid) {
+      return null;
+    }
     return _coordinator?.readCookieValueFromController(
       controller,
       name,
@@ -198,7 +202,11 @@ class CookieJarService {
     Set<String>? cookieNames,
   }) async {
     if (!_initialized) await initialize();
-    if (!io.Platform.isWindows && !io.Platform.isLinux) return;
+    if (!io.Platform.isWindows &&
+        !io.Platform.isLinux &&
+        !io.Platform.isAndroid) {
+      return;
+    }
 
     final ctx = await _buildSyncContext(
       currentUrl: currentUrl,

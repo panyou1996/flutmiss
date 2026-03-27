@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../../constants.dart';
 import '../../windows_webview_environment_service.dart';
+import 'android_cdp_service.dart';
 import 'cookie_jar_service.dart';
 import 'raw_cookie_writer.dart';
 import 'strategy/platform_cookie_strategy.dart';
@@ -16,6 +17,10 @@ import 'strategy/platform_cookie_strategy.dart';
 class CookieWriteThrough {
   static final instance = CookieWriteThrough._();
   CookieWriteThrough._();
+
+  static const Duration _androidTargetReadyTimeout = Duration(seconds: 4);
+  bool? _androidTargetReady;
+  Future<bool>? _pendingAndroidTargetReady;
 
   /// 删除 WebView 中指定 cookie 的所有 domain 变体（去重后执行）
   Future<void> _deleteFromWebView(
@@ -46,6 +51,115 @@ class CookieWriteThrough {
   Completer<void>? _pendingWrite;
   late final PlatformCookieStrategy _strategy = PlatformCookieStrategy.create();
 
+  Future<bool> _ensureAndroidTargetReady() async {
+    if (!io.Platform.isAndroid) return false;
+    if (_androidTargetReady == true) return true;
+
+    final pending = _pendingAndroidTargetReady;
+    if (pending != null) {
+      return pending;
+    }
+
+    final future = AndroidCdpService.instance.awaitTargetReady(
+      timeout: _androidTargetReadyTimeout,
+    );
+    _pendingAndroidTargetReady = future;
+    try {
+      final ready = await future;
+      _androidTargetReady = ready;
+      if (!ready) {
+        debugPrint('[CookieWriteThrough] Android CDP target not ready within ${_androidTargetReadyTimeout.inMilliseconds}ms');
+      }
+      return ready;
+    } finally {
+      if (identical(_pendingAndroidTargetReady, future)) {
+        _pendingAndroidTargetReady = null;
+      }
+    }
+  }
+
+  Future<bool> _deleteFromAndroidCdp(
+    String host,
+    String name,
+    String path,
+  ) async {
+    final variants = <String?>{
+      ..._strategy.buildDeleteDomainVariants('.$host'),
+      ..._strategy.buildDeleteDomainVariants(host),
+      null,
+    };
+
+    var deleted = false;
+    for (final domain in variants) {
+      final result = await AndroidCdpService.instance.deleteCookies({
+        'name': name,
+        'url': 'https://$host',
+        'path': path,
+        if (domain != null && domain.isNotEmpty) 'domain': domain,
+      });
+      if (result?['ok'] == true) {
+        deleted = true;
+      }
+    }
+    return deleted;
+  }
+
+  Future<bool> _setFromAndroidCdp(
+    io.Cookie cookie,
+    String host, {
+    CanonicalCookie? canonical,
+    String? rawHeader,
+  }) async {
+    final normalizedDomain =
+        CookieJarService.normalizeWebViewCookieDomain(canonical?.domain ?? cookie.domain);
+    final value = canonical?.value ?? CookieValueCodec.decode(cookie.value);
+    final params = <String, dynamic>{
+      'url': 'https://${normalizedDomain ?? host}',
+      'name': cookie.name,
+      'value': value.isEmpty ? ' ' : value,
+      'path': cookie.path ?? '/',
+      'secure': cookie.secure,
+      'httpOnly': cookie.httpOnly,
+    };
+
+    final domain = canonical?.domain ?? cookie.domain;
+    if (domain != null && domain.trim().isNotEmpty) {
+      params['domain'] = domain.trim();
+    }
+    if (cookie.expires != null) {
+      params['expires'] = cookie.expires!.millisecondsSinceEpoch / 1000.0;
+    }
+
+    final sameSite = _canonicalSameSite(canonical);
+    if (sameSite != null) {
+      params['sameSite'] = sameSite;
+    } else if (cookie.httpOnly && cookie.secure) {
+      params['sameSite'] = 'None';
+    }
+    if (canonical?.priority case final priority?) {
+      params['priority'] = priority;
+    }
+    if (canonical?.sourceScheme case final sourceScheme?) {
+      params['sourceScheme'] = sourceScheme;
+    }
+    if (canonical?.sourcePort case final sourcePort?) {
+      params['sourcePort'] = sourcePort;
+    }
+    if (canonical?.partitionKey case final partitionKey?) {
+      params['partitionKey'] = partitionKey;
+    }
+
+    final result = await AndroidCdpService.instance.setCookie(params);
+    if (result?['ok'] == true) {
+      return true;
+    }
+
+    if (rawHeader != null) {
+      debugPrint('[CookieWriteThrough] Android CDP setCookie failed for ${cookie.name}, fallback to raw header');
+    }
+    return false;
+  }
+
   /// Dio 收到 Set-Cookie 后调用（在 AppCookieManager.saveCookies 内）
   /// 只处理关键 cookie，非关键 cookie 不推送
   /// [rawSetCookieHeaders] — cookie name → 原始 Set-Cookie 头，优先用 raw 写入
@@ -65,6 +179,7 @@ class CookieWriteThrough {
       final webViewCookieManager =
           WindowsWebViewEnvironmentService.instance.cookieManager;
       final baseHost = Uri.parse(AppConstants.baseUrl).host;
+      final androidTargetReady = await _ensureAndroidTargetReady();
 
       for (final cookie in criticals) {
         final normalizedDomain =
@@ -72,6 +187,15 @@ class CookieWriteThrough {
         final host = normalizedDomain ?? baseHost;
         final cookieUrl = 'https://$host';
         final webUri = WebUri(cookieUrl);
+
+        CanonicalCookie? canonical;
+        try {
+          canonical = await CookieJarService().getCanonicalCookie(cookie.name);
+        } catch (_) {}
+
+        if (io.Platform.isAndroid && androidTargetReady) {
+          await _deleteFromAndroidCdp(host, cookie.name, cookie.path ?? '/');
+        }
 
         await _deleteFromWebView(webViewCookieManager, host, cookie.name, cookie.path ?? '/');
 
@@ -81,9 +205,23 @@ class CookieWriteThrough {
         if (rawHeader == null) {
           try {
             final jar = CookieJarService();
-            final canonical = await jar.getCanonicalCookie(cookie.name);
+            canonical ??= await jar.getCanonicalCookie(cookie.name);
             rawHeader = canonical?.toSetCookieHeader();
           } catch (_) {}
+        }
+        if (io.Platform.isAndroid && androidTargetReady) {
+          try {
+            if (await _setFromAndroidCdp(
+              cookie,
+              host,
+              canonical: canonical,
+              rawHeader: rawHeader,
+            )) {
+              continue;
+            }
+          } catch (e) {
+            debugPrint('[CookieWriteThrough] Android CDP 写入 ${cookie.name} 失败，fallback: $e');
+          }
         }
         if (rawHeader != null && rawWriter.isSupported) {
           try {
@@ -147,6 +285,7 @@ class CookieWriteThrough {
     final webViewCookieManager =
         WindowsWebViewEnvironmentService.instance.cookieManager;
     final baseHost = Uri.parse(AppConstants.baseUrl).host;
+    final androidTargetReady = await _ensureAndroidTargetReady();
 
     for (final name in const ['_t', '_forum_session', 'cf_clearance']) {
       final canonical = await jar.getCanonicalCookie(name);
@@ -176,7 +315,27 @@ class CookieWriteThrough {
       // 其他平台：先删旧值，再写入
       final cookieUrl = 'https://$host';
       final webUri = WebUri(cookieUrl);
+
+      if (io.Platform.isAndroid && androidTargetReady) {
+        await _deleteFromAndroidCdp(host, name, cookie.path ?? '/');
+      }
+
       await _deleteFromWebView(webViewCookieManager, host, name, cookie.path ?? '/');
+
+      if (io.Platform.isAndroid && androidTargetReady) {
+        try {
+          if (await _setFromAndroidCdp(
+            cookie,
+            host,
+            canonical: canonical,
+            rawHeader: canonical?.toSetCookieHeader(),
+          )) {
+            continue;
+          }
+        } catch (e) {
+          debugPrint('[CookieWriteThrough] Android CDP seed $name 失败，fallback: $e');
+        }
+      }
 
       // 优先用 raw Set-Cookie 头写入（保留 host-only 语义）
       final rawWriter = RawCookieWriter.instance;
@@ -269,14 +428,17 @@ class CookieWriteThrough {
       } catch (_) {}
 
       // 删除旧 cookie
+      final deleteParams = <String, dynamic>{
+        'name': cookie.name,
+        'url': cdpUrl,
+        'path': cookie.path ?? '/',
+      };
+      if (cdpDomain != null) {
+        deleteParams['domain'] = cdpDomain;
+      }
       await controller.callDevToolsProtocolMethod(
         methodName: 'Network.deleteCookies',
-        parameters: {
-          'name': cookie.name,
-          'url': cdpUrl,
-          if (cdpDomain != null) 'domain': cdpDomain,
-          'path': cookie.path ?? '/',
-        },
+        parameters: deleteParams,
       );
 
       // 写入新 cookie

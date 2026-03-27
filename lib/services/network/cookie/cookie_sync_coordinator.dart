@@ -35,9 +35,8 @@ class CookieSyncCoordinator {
   /// 从 WebView 同步 Cookie 到 CookieJar
   Future<void> syncFromWebView(CookieSyncContext ctx) async {
     try {
-      // Windows/Android + controller 可用时，通过 CDP 读取完整 cookie 属性
-      if ((io.Platform.isWindows || io.Platform.isAndroid) &&
-          ctx.controller != null) {
+      // Windows + controller 可用时，通过 CDP 读取完整 cookie 属性
+      if (io.Platform.isWindows && ctx.controller != null) {
         await _syncFromWebViewViaCDP(ctx);
         return;
       }
@@ -213,7 +212,11 @@ class CookieSyncCoordinator {
     CookieSyncContext ctx, {
     Set<String>? cookieNames,
   }) async {
-    if (!io.Platform.isWindows && !io.Platform.isLinux) return;
+    if (!io.Platform.isWindows &&
+        !io.Platform.isLinux &&
+        !io.Platform.isAndroid) {
+      return;
+    }
 
     final names = cookieNames ?? const {'_t', '_forum_session', 'cf_clearance'};
     await strategy.syncCriticalFromController(controller, names, ctx, jar);
@@ -453,7 +456,7 @@ class CookieSyncCoordinator {
   // 私有辅助方法
   // ---------------------------------------------------------------------------
 
-  /// CDP 同步（Windows / Android）
+  /// CDP 同步（Windows）
   Future<void> _syncFromWebViewViaCDP(CookieSyncContext ctx) async {
     final controller = ctx.controller!;
     final resolvedCurrentUrl =

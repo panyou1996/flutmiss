@@ -17,13 +17,17 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
 
     companion object {
         private const val TAG = "AppLink"
         private const val RAW_COOKIE_CHANNEL = "com.fluxdo/raw_cookie"
+        private const val ANDROID_CDP_CHANNEL = "com.fluxdo/android_cdp"
     }
+
+    private val androidCdpBridge = AndroidCdpBridge()
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
@@ -34,9 +38,11 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.github.lingyan000.fluxdo/browser"
     private val CRASHLYTICS_CHANNEL = "com.github.lingyan000.fluxdo/crashlytics"
     private val ICON_CHANNEL = "com.github.lingyan000.fluxdo/app_icon"
+    private val ioExecutor = Executors.newSingleThreadExecutor()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        Log.i("AndroidCdp", "MainActivity.configureFlutterEngine loaded")
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -115,6 +121,84 @@ class MainActivity : FlutterActivity() {
                         }
                     } else {
                         result.error("INVALID_ARGS", "url and rawSetCookie required", null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ANDROID_CDP_CHANNEL).setMethodCallHandler { call, result ->
+            Log.i("AndroidCdp", "channel method=${call.method}")
+            when (call.method) {
+                "isAvailable" -> {
+                    ioExecutor.execute {
+                        try {
+                            Log.i("AndroidCdp", "handling isAvailable")
+                            result.success(androidCdpBridge.isAvailable())
+                        } catch (e: Exception) {
+                            Log.e("AndroidCdp", "isAvailable failed: ${e.message}", e)
+                            result.success(false)
+                        }
+                    }
+                }
+                "getCookies" -> {
+                    val urls = call.argument<List<String>>("urls")
+                    Log.i("AndroidCdp", "handling getCookies urls=${urls?.size ?: 0}")
+                    if (urls == null || urls.isEmpty()) {
+                        result.error("INVALID_ARGS", "urls required", null)
+                    } else {
+                        ioExecutor.execute {
+                            try {
+                                result.success(androidCdpBridge.getCookies(urls))
+                            } catch (e: Exception) {
+                                Log.e("AndroidCdp", "getCookies failed: ${e.message}", e)
+                                result.error("CDP_FAILED", e.message, null)
+                            }
+                        }
+                    }
+                }
+                "awaitTargetReady" -> {
+                    val timeoutMs = call.argument<Number>("timeoutMs")?.toLong() ?: 2500L
+                    Log.i("AndroidCdp", "handling awaitTargetReady timeoutMs=$timeoutMs")
+                    ioExecutor.execute {
+                        try {
+                            result.success(androidCdpBridge.awaitTargetReady(timeoutMs))
+                        } catch (e: Exception) {
+                            Log.e("AndroidCdp", "awaitTargetReady failed: ${e.message}", e)
+                            result.success(false)
+                        }
+                    }
+                }
+                "setCookie" -> {
+                    val params = call.arguments<Map<String, Any?>>()
+                    Log.i("AndroidCdp", "handling setCookie keys=${params?.keys ?: emptySet<String>()}")
+                    if (params == null || params.isEmpty()) {
+                        result.error("INVALID_ARGS", "params required", null)
+                    } else {
+                        ioExecutor.execute {
+                            try {
+                                result.success(androidCdpBridge.setCookie(params))
+                            } catch (e: Exception) {
+                                Log.e("AndroidCdp", "setCookie failed: ${e.message}", e)
+                                result.error("CDP_FAILED", e.message, null)
+                            }
+                        }
+                    }
+                }
+                "deleteCookies" -> {
+                    val params = call.arguments<Map<String, Any?>>()
+                    Log.i("AndroidCdp", "handling deleteCookies keys=${params?.keys ?: emptySet<String>()}")
+                    if (params == null || params.isEmpty()) {
+                        result.error("INVALID_ARGS", "params required", null)
+                    } else {
+                        ioExecutor.execute {
+                            try {
+                                result.success(androidCdpBridge.deleteCookies(params))
+                            } catch (e: Exception) {
+                                Log.e("AndroidCdp", "deleteCookies failed: ${e.message}", e)
+                                result.error("CDP_FAILED", e.message, null)
+                            }
+                        }
                     }
                 }
                 else -> result.notImplemented()

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import '../services/discourse/discourse_service.dart';
 import '../services/preloaded_data_service.dart';
 import '../services/network/cookie/cookie_jar_service.dart';
 import '../services/network/cookie/cookie_sync_service.dart';
+import '../services/network/cookie/cookie_write_through.dart';
 import '../services/toast_service.dart';
 import '../services/hcaptcha_accessibility_service.dart';
 import '../services/webview_settings.dart';
@@ -42,6 +44,7 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
   bool _isLoading = true;
   bool _loginHandled = false;
   bool _loginInProgress = false;
+  bool _isCompletingLogin = false;
   String? _lastHomeResponseUrl;
   String _url = AppConstants.baseUrl;
   double _progress = 0;
@@ -50,7 +53,7 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
   @override
   void initState() {
     super.initState();
-    _cookieJar.syncToWebView();
+    CookieWriteThrough.instance.seedCriticalCookies();
     HCaptchaAccessibilityService().syncToWebView();
     _loadSavedUsername();
   }
@@ -119,7 +122,10 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
       ),
       body: Column(
         children: [
-          if (_isLoading) LinearProgressIndicator(value: _progress),
+          if (_isLoading || _isCompletingLogin)
+            LinearProgressIndicator(
+              value: _isCompletingLogin ? null : _progress,
+            ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -142,8 +148,10 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
             ),
           ),
           Expanded(
-            child: WebViewSettings.wrapWithScrollFix(
-              InAppWebView(
+            child: Stack(
+              children: [
+                WebViewSettings.wrapWithScrollFix(
+                  InAppWebView(
                 webViewEnvironment:
                     WindowsWebViewEnvironmentService.instance.environment,
                 initialUrlRequest: URLRequest(
@@ -212,8 +220,31 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
                     _checkLoginStatus(controller, currentUrl: url?.toString());
                   }
                 },
-              ),
-              getController: () => _controller,
+                  ),
+                  getController: () => _controller,
+                ),
+                if (_isCompletingLogin)
+                  Positioned.fill(
+                    child: ColoredBox(
+                      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.88),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const CircularProgressIndicator(),
+                            const SizedBox(height: 16),
+                            Text(context.l10n.webviewLogin_loginSuccess),
+                            const SizedBox(height: 8),
+                            Text(
+                              '正在同步登录状态...',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
         ],
@@ -361,6 +392,17 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
       }
 
       currentUrl ??= (await controller.getUrl())?.toString();
+      if (mounted && !_isCompletingLogin) {
+        setState(() {
+          _isCompletingLogin = true;
+          _isLoading = true;
+        });
+      }
+      await _cookieJar.syncCriticalCookiesFromController(
+        controller,
+        currentUrl: currentUrl,
+        cookieNames: const {'_t', '_forum_session', 'cf_clearance'},
+      );
       final tToken = await _readTTokenFromWebView(
         controller,
         currentUrl: currentUrl,
@@ -372,73 +414,93 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
       }
 
       _loginHandled = true;
+      final finalToken = await _finalizeLoginBeforeExit(
+        controller,
+        username: username,
+        currentUrl: currentUrl,
+        webViewToken: tToken,
+      );
 
-      try {
-        await _service.saveUsername(username);
-        await _syncCsrfFromPage(controller);
-
-        // 先切断旧请求，防止 syncFromWebView 期间旧响应的 Set-Cookie 写入竞争
-        AuthSession().advance();
-
-        // Windows 上先用 DevTools 实时 cookie 回写关键登录态，再做常规同步。
-        await _cookieJar.syncCriticalCookiesFromController(
-          controller,
-          currentUrl: currentUrl,
-          cookieNames: const {'_t', '_forum_session', 'cf_clearance'},
-        );
-        // 登录后从 WebView 同步所有 Cookie 到 CookieJar（包括 _t、cf_clearance 等）
-        // syncFromWebView 内部会先清掉关键 cookie 的旧值，确保 WebView 的值不被残留的 host-only cookie 覆盖
-        await _cookieJar.syncFromWebView(
-          currentUrl: currentUrl,
-          controller: controller,
-        );
-
-        final jarToken = await _cookieJar.getTToken();
-        final effectiveToken = (jarToken != null && jarToken.isNotEmpty)
-            ? jarToken
-            : tToken;
-        final tokenMatch = jarToken == tToken;
-        if (!tokenMatch) {
-          debugPrint(
-            '[Login] _t 不一致! WebView=${tToken.length}chars, Jar=${jarToken?.length}chars',
-          );
-        }
-
-        // 仅设置 token，暂不广播
-        _service.setToken(effectiveToken);
-        final reusedPreloaded = _canReuseHomePageData(currentUrl)
-            ? await _hydratePreloadedFromPage(controller)
-            : false;
-        if (!reusedPreloaded) {
-          debugPrint('[Login] 当前页面无可复用首页数据，回退到 HTTP refresh');
-          await PreloadedDataService().refresh();
-        }
-        // 数据就绪后再广播（触发 provider rebuild + MessageBus 初始化）
-        _service.onLoginSuccess(effectiveToken);
-
-        // 记录登录日志
-        LogWriter.instance.write({
-          'timestamp': DateTime.now().toIso8601String(),
-          'level': 'info',
-          'type': 'lifecycle',
-          'event': 'login',
-          'message': '用户登录成功',
-          'username': username,
-          'jarTokenLen': jarToken?.length,
-          'webViewTokenLen': tToken.length,
-          'tokenMatch': tokenMatch,
-        });
-
-        if (mounted) {
-          ToastService.showSuccess(S.current.webviewLogin_loginSuccess);
-          Navigator.of(context).pop(true);
-        }
-      } catch (e) {
-        _loginHandled = false;
-        debugPrint('[Login] 登录态同步失败: $e');
+      if (mounted) {
+        ToastService.showSuccess(S.current.webviewLogin_loginSuccess);
+        Navigator.of(context).pop(true);
       }
+
+      unawaited(
+        _finalizeLoginAfterExit(
+          currentUrl: currentUrl,
+          token: finalToken,
+        ),
+      );
     } finally {
       _loginInProgress = false;
+    }
+  }
+
+  Future<String> _finalizeLoginBeforeExit(
+    InAppWebViewController controller, {
+    required String username,
+    required String? currentUrl,
+    required String webViewToken,
+  }) async {
+    await _service.saveUsername(username);
+    await _syncCsrfFromPage(controller);
+
+    // 先切断旧请求，防止 syncFromWebView 期间旧响应的 Set-Cookie 写入竞争
+    AuthSession().advance();
+
+    await _cookieJar.syncCriticalCookiesFromController(
+      controller,
+      currentUrl: currentUrl,
+      cookieNames: const {'_t', '_forum_session', 'cf_clearance'},
+    );
+    await _cookieJar.syncFromWebView(
+      currentUrl: currentUrl,
+      controller: controller,
+    );
+
+    final jarToken = await _cookieJar.getTToken();
+    final finalToken = (jarToken != null && jarToken.isNotEmpty)
+        ? jarToken
+        : webViewToken;
+    final tokenMatch = jarToken == webViewToken;
+    if (!tokenMatch) {
+      debugPrint(
+        '[Login] _t 不一致! WebView=${webViewToken.length}chars, Jar=${jarToken?.length}chars',
+      );
+    }
+
+    _service.setToken(finalToken);
+    _service.onLoginSuccess(finalToken);
+    return finalToken;
+  }
+
+  Future<void> _finalizeLoginAfterExit({
+    required String? currentUrl,
+    required String token,
+  }) async {
+    try {
+      final reusedPreloaded = false;
+      if (!reusedPreloaded) {
+        debugPrint('[Login] 当前页面无可复用首页数据，回退到 HTTP refresh');
+        await PreloadedDataService().refresh();
+      }
+
+      final jarToken = await _cookieJar.getTToken();
+      final tokenMatch = jarToken == token;
+      LogWriter.instance.write({
+        'timestamp': DateTime.now().toIso8601String(),
+        'level': 'info',
+        'type': 'lifecycle',
+        'event': 'login',
+        'message': '用户登录成功',
+        'jarTokenLen': jarToken?.length,
+        'webViewTokenLen': token.length,
+        'tokenMatch': tokenMatch,
+        'currentUrl': currentUrl,
+      });
+    } catch (e) {
+      debugPrint('[Login] 登录态后台收尾失败: $e');
     }
   }
 
@@ -493,37 +555,6 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
     } catch (_) {}
   }
 
-  Future<bool> _hydratePreloadedFromPage(
-    InAppWebViewController controller,
-  ) async {
-    try {
-      final currentUrl = (await controller.getUrl())?.toString();
-      if (!_isHomePageUrl(currentUrl)) {
-        debugPrint('[Login] 当前页面不是首页，拒绝复用 WebView 页面数据: $currentUrl');
-        return false;
-      }
-
-      final html = await controller.getHtml();
-      if (html == null) {
-        return false;
-      }
-
-      final htmlText = html.toString();
-      if (htmlText.isEmpty || htmlText == 'null') {
-        return false;
-      }
-
-      final hydrated = await PreloadedDataService().hydrateFromHtml(htmlText);
-      if (hydrated) {
-        debugPrint('[Login] 已直接复用 WebView 页面预加载数据');
-      }
-      return hydrated;
-    } catch (e) {
-      debugPrint('[Login] 复用 WebView 页面预加载数据失败: $e');
-      return false;
-    }
-  }
-
   Future<void> _handleLoadedResource(
     InAppWebViewController controller,
     LoadedResource resource,
@@ -540,26 +571,33 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
     await _checkLoginStatus(controller, currentUrl: resourceUrl);
   }
 
-  bool _canReuseHomePageData(String? currentUrl) {
-    return _isHomePageUrl(currentUrl) &&
-        _lastHomeResponseUrl != null &&
-        _urlsMatchByPath(currentUrl, _lastHomeResponseUrl);
-  }
-
   Future<String?> _readTTokenFromWebView(
     InAppWebViewController controller, {
     String? currentUrl,
   }) async {
     final cookieManager =
         WindowsWebViewEnvironmentService.instance.cookieManager;
-    final cookies = await cookieManager.getCookies(
-      url: WebUri(AppConstants.baseUrl),
-    );
+    final candidates = <String>{
+      AppConstants.baseUrl,
+      '${AppConstants.baseUrl}/',
+      if (currentUrl != null && currentUrl.isNotEmpty) currentUrl,
+    };
 
-    for (final cookie in cookies) {
-      if (cookie.name == '_t' && cookie.value.isNotEmpty) {
-        return cookie.value;
+    for (final url in candidates) {
+      final cookies = await cookieManager.getCookies(
+        url: WebUri(url),
+      );
+
+      for (final cookie in cookies) {
+        if (cookie.name == '_t' && cookie.value.isNotEmpty) {
+          return cookie.value;
+        }
       }
+    }
+
+    final jarToken = await _cookieJar.getTToken();
+    if (jarToken != null && jarToken.isNotEmpty) {
+      return jarToken;
     }
 
     return _cookieJar.readCookieValueFromController(
@@ -605,23 +643,6 @@ class _WebViewLoginPageState extends ConsumerState<WebViewLoginPage> {
     final currentPath = _normalizePath(uri.path);
     final homePath = _normalizePath(_baseUri.path);
     return currentPath == homePath;
-  }
-
-  bool _urlsMatchByPath(String? left, String? right) {
-    final leftUri = Uri.tryParse(left ?? '');
-    final rightUri = Uri.tryParse(right ?? '');
-    if (leftUri == null || rightUri == null) {
-      return false;
-    }
-    if (leftUri.scheme != rightUri.scheme ||
-        leftUri.host != rightUri.host ||
-        leftUri.hasPort != rightUri.hasPort) {
-      return false;
-    }
-    if (leftUri.hasPort && leftUri.port != rightUri.port) {
-      return false;
-    }
-    return _normalizePath(leftUri.path) == _normalizePath(rightUri.path);
   }
 
   String _normalizePath(String path) {

@@ -191,6 +191,7 @@ jsonEncode([name, normalizedDomain, path, hostOnly, partitionKey])
 ## 待实测验证
 
 - [ ] iOS 上 `HTTPCookie.cookies(withResponseHeaderFields:for:)` 对 host-only cookie 是否真的比属性构造可靠
-- [ ] Android CDP `Network.getCookies` 在 `setWebContentsDebuggingEnabled(true)` 后是否稳定返回
+- [x] Android 应用内原生 CDP bridge 已打通 `Network.getCookies`
+- [ ] Android 应用内原生 CDP bridge 的 `Network.setCookie` 需继续补实测验证
 - [ ] `rawSetCookie` 是否被 `SetCookieParser.parse` 正确存入
 - [ ] 全平台：`_t` 多副本日志是否消失
