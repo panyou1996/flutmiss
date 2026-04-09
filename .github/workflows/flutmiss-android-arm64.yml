@@ -26,6 +26,22 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate CA certificates
+        working-directory: core/doh_proxy
+        run: cargo run --bin gen_ca
+
+      - name: Sync cert resources
+        run: bash scripts/sync_cert_resources.sh
+
+      - name: Verify cert resources
+        run: |
+          test -f assets/certs/proxy_ca.pem
+          test -f android/app/src/main/res/raw/proxy_ca.der
+          ls -lh assets/certs android/app/src/main/res/raw
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
