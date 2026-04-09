@@ -250,7 +250,10 @@ class AppConstants {
   }
 
   /// linux.do 域名
-  static const String baseUrl = 'https://linux.do';
+  static const String baseUrl = String.fromEnvironment(
+    'FLUXDO_BASE_URL',
+    defaultValue: 'http://127.0.0.1:8000',
+  );
 
   /// 请求首页时是否跳过 X-CSRF-Token（用于预热）
   static const bool skipCsrfForHomeRequest = true;
