@@ -38,46 +38,35 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install Android build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends zip unzip
-
-      - name: Create temporary signing key
-        working-directory: android
-        run: |
-          keytool -genkeypair \
-            -alias upload \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 36500 \
-            -storetype JKS \
-            -keystore app/upload-keystore.jks \
-            -storepass android \
-            -keypass android \
-            -dname "CN=Flutter CI, OU=CI, O=GitHub, L=Earth, S=Earth, C=US"
-          cat > key.properties <<'EOF'
-          storePassword=android
-          keyPassword=android
-          keyAlias=upload
-          storeFile=upload-keystore.jks
-          EOF
-
       - name: Fetch dependencies
         run: flutter pub get
 
       - name: Build arm64 APK
-        run: flutter build apk --release --target-platform android-arm64 --dart-define=cronetHttpNoPlay=true
+        run: |
+          flutter build apk \
+            --debug \
+            --target-platform android-arm64 \
+            --dart-define=cronetHttpNoPlay=true
 
-      - name: Rename artifact
+      - name: Collect APK artifact
         run: |
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk dist/flutmiss-arm64-v8a-release.apk
+          echo "Built files:"
+          find build/app/outputs/flutter-apk -maxdepth 1 -name '*.apk' -print
+          apk_path=$(find build/app/outputs/flutter-apk -maxdepth 1 -name '*arm64*apk' | head -n 1)
+          if [ -z "$apk_path" ]; then
+            apk_path=$(find build/app/outputs/flutter-apk -maxdepth 1 -name 'app-debug.apk' | head -n 1)
+          fi
+          if [ -z "$apk_path" ]; then
+            echo "No APK produced" >&2
+            exit 1
+          fi
+          cp "$apk_path" dist/flutmiss-arm64-debug.apk
           ls -lh dist
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: flutmiss-arm64-v8a-apk
-          path: dist/flutmiss-arm64-v8a-release.apk
+          name: flutmiss-arm64-debug-apk
+          path: dist/flutmiss-arm64-debug.apk
           if-no-files-found: error
