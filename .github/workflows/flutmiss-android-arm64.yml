@@ -18,7 +18,7 @@ jobs:
   build-arm64:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       actions: read
     steps:
       - name: Checkout
@@ -107,3 +107,15 @@ jobs:
           name: flutmiss-arm64-build-log
           path: logs/flutter-build.log
           if-no-files-found: ignore
+
+      - name: Publish GitHub Release
+        if: success() && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: flutmiss-arm64-debug-latest
+          name: flutmiss arm64 debug latest
+          prerelease: true
+          make_latest: false
+          files: dist/flutmiss-arm64-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
