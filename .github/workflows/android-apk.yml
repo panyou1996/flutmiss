@@ -10,6 +10,7 @@ on:
       - 'lib/**'
       - 'packages/**'
       - 'assets/**'
+      - 'core/doh_proxy/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - '.github/workflows/android-apk.yml'
@@ -18,35 +19,97 @@ concurrency:
   group: android-apk-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FLUTTER_SUPPRESS_ANALYTICS: true
+  PUB_CACHE: ~/.pub-cache
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate CA certificates
+        working-directory: core/doh_proxy
+        run: cargo run --bin gen_ca
+
+      - name: Sync cert resources
+        run: bash scripts/sync_cert_resources.sh
+
+      - name: Verify cert resources
+        run: |
+          test -f assets/certs/proxy_ca.pem
+          test -f android/app/src/main/res/raw/proxy_ca.der
+          ls -lh assets/certs android/app/src/main/res/raw
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - name: Get packages
+      - name: Fetch dependencies
         run: flutter pub get
 
-      - name: Build debug APK
-        run: flutter build apk --debug --dart-define=cronetHttpNoPlay=true
+      - name: Build arm64 APK
+        shell: bash
+        run: |
+          mkdir -p logs
+          set -o pipefail
+          flutter build apk \
+            --debug \
+            --target-platform android-arm64 \
+            --dart-define=cronetHttpNoPlay=true \
+            2>&1 | tee logs/flutter-build.log
+
+      - name: Show build tail
+        if: always()
+        shell: bash
+        run: |
+          echo "--- build log tail ---"
+          tail -n 200 logs/flutter-build.log || true
+
+      - name: Collect APK artifact
+        if: success()
+        run: |
+          mkdir -p dist
+          echo "Built files:"
+          find build/app/outputs/flutter-apk -maxdepth 1 -name '*.apk' -print
+          apk_path=$(find build/app/outputs/flutter-apk -maxdepth 1 -name '*arm64*apk' | head -n 1)
+          if [ -z "$apk_path" ]; then
+            apk_path=$(find build/app/outputs/flutter-apk -maxdepth 1 -name 'app-debug.apk' | head -n 1)
+          fi
+          if [ -z "$apk_path" ]; then
+            echo "No APK produced" >&2
+            exit 1
+          fi
+          cp "$apk_path" dist/flutmiss-arm64-debug.apk
+          ls -lh dist
 
       - name: Upload APK artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: fluxdo-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: flutmiss-arm64-debug-apk
+          path: dist/flutmiss-arm64-debug.apk
           if-no-files-found: error
-          retention-days: 7
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutmiss-arm64-build-log
+          path: logs/flutter-build.log
+          if-no-files-found: ignore
