@@ -123,10 +123,27 @@ jobs:
 
       - name: Build Android
         if: startsWith(matrix.platform, 'android')
+        shell: bash
         run: |
-          flutter build apk --release --target-platform ${{ matrix.flutter-target }} --dart-define=cronetHttpNoPlay=true
+          mkdir -p logs
+          set -o pipefail
+          flutter build apk \
+            --release \
+            --target-platform ${{ matrix.flutter-target }} \
+            --dart-define=cronetHttpNoPlay=true \
+            2>&1 | tee logs/android-build.log
           mkdir -p dist
-          mv build/app/outputs/flutter-apk/app-release.apk dist/fluxdo-${{ matrix.arch }}.apk
+          echo "Built files:"
+          find build/app/outputs/flutter-apk -maxdepth 1 -name '*.apk' -print
+          apk_path=$(find build/app/outputs/flutter-apk -maxdepth 1 -name '*${{ matrix.arch }}*apk' | head -n 1)
+          if [ -z "$apk_path" ]; then
+            apk_path=$(find build/app/outputs/flutter-apk -maxdepth 1 -name 'app-release.apk' | head -n 1)
+          fi
+          if [ -z "$apk_path" ]; then
+            echo "No APK produced" >&2
+            exit 1
+          fi
+          cp "$apk_path" dist/fluxdo-${{ matrix.arch }}.apk
 
       - name: Build DOH Proxy for iOS
         if: matrix.platform == 'ios'
